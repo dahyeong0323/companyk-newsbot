@@ -79,10 +79,13 @@ class RSSCollectorSettings:
     read_timeout_seconds: float = 8.0
     write_timeout_seconds: float = 5.0
     pool_timeout_seconds: float = 3.0
+    max_connection_retries: int = 1
 
     def __post_init__(self) -> None:
         if self.concurrency < 1:
             raise ValueError("RSS concurrency must be positive")
+        if self.max_connection_retries < 0:
+            raise ValueError("RSS connection retries must not be negative")
 
     @property
     def timeout(self) -> httpx.Timeout:
@@ -171,13 +174,28 @@ class GoogleNewsRSSCollector:
         if not query:
             raise ValueError("Google News RSS query must not be blank")
         params = {"q": query, "hl": self.language, "gl": self.country, "ceid": f"{self.country}:en"}
-        try:
-            response = await self._client.get(GOOGLE_NEWS_RSS_URL, params=params)
-            response.raise_for_status()
-        except httpx.TimeoutException as exc:
-            raise QueryTimeoutError(f"Google News RSS request timed out for {query!r}: {exc}") from exc
-        except httpx.HTTPError as exc:
-            raise QueryHTTPError(f"Google News RSS request failed for {query!r}: {exc}") from exc
+        connection_failures = 0
+        while True:
+            try:
+                response = await self._client.get(GOOGLE_NEWS_RSS_URL, params=params)
+                response.raise_for_status()
+                break
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                if connection_failures < self.settings.max_connection_retries:
+                    connection_failures += 1
+                    continue
+                attempts = connection_failures + 1
+                if isinstance(exc, httpx.ConnectTimeout):
+                    raise QueryTimeoutError(
+                        f"Google News RSS connection timed out for {query!r} after {attempts} attempts: {exc}"
+                    ) from exc
+                raise QueryHTTPError(
+                    f"Google News RSS connection failed for {query!r} after {attempts} attempts: {exc}"
+                ) from exc
+            except httpx.TimeoutException as exc:
+                raise QueryTimeoutError(f"Google News RSS request timed out for {query!r}: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise QueryHTTPError(f"Google News RSS request failed for {query!r}: {exc}") from exc
 
         parsed = feedparser.parse(response.content)
         if parsed.bozo and not parsed.entries:

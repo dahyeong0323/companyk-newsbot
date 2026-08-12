@@ -106,3 +106,56 @@ def test_collect_many_isolates_timeout_http_and_parse_failures() -> None:
     assert len(result.articles) == 1
     assert len(result.successes) == 1
     assert len(result.failures) == 3
+
+
+@pytest.mark.parametrize("failure_type", ["connect_error", "connect_timeout"])
+def test_connection_failure_is_retried_once_then_succeeds(failure_type: str) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            if failure_type == "connect_timeout":
+                raise httpx.ConnectTimeout("connect timed out", request=request)
+            raise httpx.ConnectError("connection reset", request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            return await collector.collect_many(["retry succeeds"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert attempts == 2
+    assert len(result.successes) == 1
+    assert len(result.articles) == 1
+
+
+@pytest.mark.parametrize("failure_type", ["read_timeout", "http_status", "parse_error"])
+def test_non_connection_failures_are_not_retried(failure_type: str) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if failure_type == "read_timeout":
+            raise httpx.ReadTimeout("read timed out", request=request)
+        if failure_type == "http_status":
+            return httpx.Response(429, request=request)
+        return httpx.Response(200, content=b"not an rss feed", request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            return await collector.collect_many(["no retry"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert attempts == 1
+    assert len(result.failures) == 1
