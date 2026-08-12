@@ -120,7 +120,10 @@ class KeywordMapConfig(BaseModel):
         return self
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "keyword_map_FINAL.yaml"
+# Railway runs the installed package from the repository checkout.  The frozen
+# map intentionally stays a top-level, auditable project asset rather than a
+# duplicated Python package resource.
+DEFAULT_CONFIG_PATH = Path.cwd() / "config" / "keyword_map_FINAL.yaml"
 
 
 def load_keyword_map(path: Path | str = DEFAULT_CONFIG_PATH) -> KeywordMapConfig:

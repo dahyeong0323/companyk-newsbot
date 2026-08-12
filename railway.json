@@ -1,7 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "python -m pip install ."
+  },
   "deploy": {
-    "buildCommand": "python -m pip install .",
     "startCommand": "python -m companyk_newsbot.main",
     "restartPolicyType": "NEVER",
     "restartPolicyMaxRetries": 1
