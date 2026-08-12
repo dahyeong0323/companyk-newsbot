@@ -5,17 +5,26 @@ from datetime import date
 
 from .config import load_keyword_map
 from .email import HtmlEmailRenderer, ResendEmailSender, ResendSettings
+from .e2e import E2EExecutionError, run_real_e2e
 from .state import JsonStateStore
 
 
 def main() -> int:
     load_keyword_map()
     mode = os.getenv("RUN_MODE", "shadow").lower()
-    if mode not in {"local", "test", "shadow", "live"}:
-        raise ValueError("RUN_MODE must be local, test, shadow, or live")
+    if mode not in {"local", "test", "shadow", "e2e_test", "live"}:
+        raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, or live")
     if mode == "live":
         raise RuntimeError("live mode is blocked until delivery is implemented and explicitly enabled")
     store = JsonStateStore(os.getenv("STATE_DIR", ".state"))
+    if mode == "e2e_test":
+        try:
+            result = run_real_e2e(load_keyword_map(), store)
+        except E2EExecutionError as exc:
+            store.record_run(mode=mode, status="failed", details={"stage": exc.stage, "message": str(exc)})
+            raise
+        store.record_run(mode=mode, status="success", details={"phase": "real_e2e_test", **result.log_payload()})
+        return 0
     if mode == "test":
         rendered = HtmlEmailRenderer().render([], report_date=date.today())
         sender = ResendEmailSender(ResendSettings.from_environment())
