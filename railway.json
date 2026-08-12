@@ -1,0 +1,8 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python -m companyk_newsbot.main",
+    "restartPolicyType": "NEVER",
+    "restartPolicyMaxRetries": 0
+  }
+}
