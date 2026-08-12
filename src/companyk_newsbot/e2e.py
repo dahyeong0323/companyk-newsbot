@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date
+import asyncio
 import hashlib
 import json
 import os
-from typing import Callable
 from zoneinfo import ZoneInfo
 
-from companyk_newsbot.collectors.google_news_rss import CollectionError, GoogleNewsRSSCollector
+from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
@@ -89,16 +89,15 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
     collected = []
     collection_failures: list[dict[str, str]] = []
     try:
-        with GoogleNewsRSSCollector() as collector:
-            for route, queries in (("direct", direct_queries), ("external", exposure_queries)):
-                for query in queries:
-                    try:
-                        batch = collector.collect(query)
-                        collected.extend(batch)
-                        _log("collection_query", route=route, query=query, articles=len(batch))
-                    except CollectionError as exc:
-                        collection_failures.append({"route": route, "query": query, "reason": str(exc)})
-                        _log("collection_rejected", route=route, query=query, reason=str(exc))
+        async def collect_all() -> list:
+            async with GoogleNewsRSSCollector() as collector:
+                direct_articles = await collector.collect_many(direct_queries)
+                external_articles = await collector.collect_many(exposure_queries)
+                _log("collection_route", route="direct", queries=len(direct_queries), articles=len(direct_articles))
+                _log("collection_route", route="external", queries=len(exposure_queries), articles=len(external_articles))
+                return [*direct_articles, *external_articles]
+
+        collected = asyncio.run(collect_all())
     except Exception as exc:
         raise E2EExecutionError("collection", str(exc)) from exc
     collected_today = [

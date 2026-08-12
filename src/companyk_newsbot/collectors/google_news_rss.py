@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -22,6 +24,37 @@ TRACKING_PARAMETERS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid"})
 
 class CollectionError(RuntimeError):
     """Raised when an RSS feed cannot be retrieved or parsed safely."""
+
+
+@dataclass(frozen=True)
+class RSSCollectorSettings:
+    """Network and concurrency limits for one RSS collection run."""
+
+    concurrency: int = 6
+    connect_timeout_seconds: float = 3.0
+    read_timeout_seconds: float = 8.0
+    write_timeout_seconds: float = 5.0
+    pool_timeout_seconds: float = 3.0
+
+    def __post_init__(self) -> None:
+        if self.concurrency < 1:
+            raise ValueError("RSS concurrency must be positive")
+
+    @property
+    def timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=self.connect_timeout_seconds,
+            read=self.read_timeout_seconds,
+            write=self.write_timeout_seconds,
+            pool=self.pool_timeout_seconds,
+        )
+
+    @property
+    def limits(self) -> httpx.Limits:
+        return httpx.Limits(
+            max_connections=self.concurrency,
+            max_keepalive_connections=self.concurrency,
+        )
 
 
 def canonicalize_url(url: str) -> str:
@@ -57,39 +90,45 @@ def parse_published_at(value: str | None) -> datetime | None:
 
 
 class GoogleNewsRSSCollector:
-    """Collect Google News RSS results for explicit queries only."""
+    """Collect explicit Google News RSS queries with bounded concurrency."""
 
     def __init__(
         self,
         *,
-        client: httpx.Client | None = None,
+        client: httpx.AsyncClient | None = None,
         now: Callable[[], datetime] | None = None,
         language: str = "en-US",
         country: str = "US",
+        settings: RSSCollectorSettings | None = None,
     ) -> None:
-        self._client = client or httpx.Client(timeout=20.0, follow_redirects=True)
+        self.settings = settings or RSSCollectorSettings()
+        self._client = client or httpx.AsyncClient(
+            timeout=self.settings.timeout,
+            limits=self.settings.limits,
+            follow_redirects=True,
+        )
         self._owns_client = client is None
         self._now = now or (lambda: datetime.now(UTC))
         self.language = language
         self.country = country
 
-    def close(self) -> None:
+    async def close(self) -> None:
         if self._owns_client:
-            self._client.close()
+            await self._client.aclose()
 
-    def __enter__(self) -> "GoogleNewsRSSCollector":
+    async def __aenter__(self) -> "GoogleNewsRSSCollector":
         return self
 
-    def __exit__(self, *_: object) -> None:
-        self.close()
+    async def __aexit__(self, *_: object) -> None:
+        await self.close()
 
-    def collect(self, query: str) -> list[Article]:
+    async def collect(self, query: str) -> list[Article]:
         query = query.strip()
         if not query:
             raise ValueError("Google News RSS query must not be blank")
         params = {"q": query, "hl": self.language, "gl": self.country, "ceid": f"{self.country}:en"}
         try:
-            response = self._client.get(GOOGLE_NEWS_RSS_URL, params=params)
+            response = await self._client.get(GOOGLE_NEWS_RSS_URL, params=params)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise CollectionError(f"Google News RSS request failed for {query!r}: {exc}") from exc
@@ -118,9 +157,31 @@ class GoogleNewsRSSCollector:
                 articles.append(article)
         return articles
 
-    def collect_many(self, queries: Iterable[str]) -> list[Article]:
-        """Collect each explicit query; cross-query deduplication belongs to Step 4."""
-        return [article for query in queries for article in self.collect(query)]
+    async def collect_many(self, queries: Iterable[str]) -> list[Article]:
+        """Collect explicit queries concurrently without exceeding the configured bound."""
+        query_list = list(queries)
+        if not query_list:
+            return []
+
+        queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
+        for index, query in enumerate(query_list):
+            queue.put_nowait((index, query))
+        batches: list[list[Article] | None] = [None] * len(query_list)
+
+        async def worker() -> None:
+            while True:
+                try:
+                    index, query = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    batches[index] = await self.collect(query)
+                finally:
+                    queue.task_done()
+
+        worker_count = min(self.settings.concurrency, len(query_list))
+        await asyncio.gather(*(worker() for _ in range(worker_count)))
+        return [article for batch in batches if batch is not None for article in batch]
 
     @staticmethod
     def _normalize_entry(

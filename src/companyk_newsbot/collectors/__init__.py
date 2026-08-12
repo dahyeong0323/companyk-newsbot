@@ -1,5 +1,5 @@
 """News collectors."""
 
-from .google_news_rss import GoogleNewsRSSCollector
+from .google_news_rss import GoogleNewsRSSCollector, RSSCollectorSettings
 
-__all__ = ["GoogleNewsRSSCollector"]
+__all__ = ["GoogleNewsRSSCollector", "RSSCollectorSettings"]
