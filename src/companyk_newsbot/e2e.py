@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import CollectionError, GoogleNewsRSSCollector
 from companyk_newsbot.config import KeywordMapConfig
@@ -21,6 +22,8 @@ from companyk_newsbot.state import JsonStateStore
 
 
 TEST_RECIPIENT = "jeremy.cheon@pm.me"
+KST = ZoneInfo("Asia/Seoul")
+MAX_JUDGE_CALLS = 25
 
 
 class E2EExecutionError(RuntimeError):
@@ -90,10 +93,15 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
                         _log("collection_rejected", route=route, query=query, reason=str(exc))
     except Exception as exc:
         raise E2EExecutionError("collection", str(exc)) from exc
-    _log("collection_complete", collected=len(collected), failures=len(collection_failures))
+    collected_today = [
+        article
+        for article in collected
+        if article.published_at is not None and article.published_at.astimezone(KST).date() == report_date
+    ]
+    _log("collection_complete", collected=len(collected), same_day=len(collected_today), failures=len(collection_failures))
 
     try:
-        article_dedup = ArticleDeduplicator().deduplicate(collected)
+        article_dedup = ArticleDeduplicator().deduplicate(collected_today)
         detector = RouteADetector(config)
         route_a_matches = [match for article in article_dedup.articles for match in detector.detect(article)]
         route_a_events = RouteAEventClusterer().cluster(route_a_matches)
@@ -115,7 +123,12 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
     judge = RouteBCausalMaterialityJudge.from_environment()
     judged = []
     try:
-        for candidate in candidate_result.candidates:
+        candidates_to_judge = candidate_result.candidates[:MAX_JUDGE_CALLS]
+        skipped_for_cap = candidate_result.candidates[MAX_JUDGE_CALLS:]
+        if skipped_for_cap:
+            reasons["e2e_judge_cap"] += len(skipped_for_cap)
+            _log("route_b_judge_cap", max_calls=MAX_JUDGE_CALLS, skipped=len(skipped_for_cap))
+        for candidate in candidates_to_judge:
             result = judge.judge(candidate)
             judged.append(result)
             if not result.decision.qualifies:
@@ -166,7 +179,7 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
         collected=len(collected), collection_failures=len(collection_failures), article_deduped=len(article_dedup.articles),
         article_duplicates=sum(len(group.duplicates) for group in article_dedup.duplicate_groups),
         route_a_matches=len(route_a_matches), route_a_events=len(route_a_events), route_b_candidates=len(candidate_result.candidates),
-        route_b_accepted=len(accepted), route_b_rejected=len(candidate_result.rejections) + len(judged) - len(accepted),
+        route_b_accepted=len(accepted), route_b_rejected=len(candidate_result.rejections) + len(judged) - len(accepted) + len(skipped_for_cap),
         reject_reasons=dict(reasons), final_items=len(unsent), already_sent=already_sent,
         judge_calls=len(judged), summary_calls=len(email_items), delivery_id=delivery_id,
     )
