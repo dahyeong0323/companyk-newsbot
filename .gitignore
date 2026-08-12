@@ -7,3 +7,4 @@ __pycache__/
 .state/
 artifacts/*
 !artifacts/.gitkeep
+build/
