@@ -3,6 +3,6 @@
   "deploy": {
     "startCommand": "python -m companyk_newsbot.main",
     "restartPolicyType": "NEVER",
-    "restartPolicyMaxRetries": 0
+    "restartPolicyMaxRetries": 1
   }
 }
