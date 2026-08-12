@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
 import re
+import unicodedata
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -80,12 +81,16 @@ class RSSCollectorSettings:
     write_timeout_seconds: float = 5.0
     pool_timeout_seconds: float = 3.0
     max_connection_retries: int = 1
+    per_query_deadline_seconds: float = 12.0
+    collection_deadline_seconds: float = 75.0
 
     def __post_init__(self) -> None:
         if self.concurrency < 1:
             raise ValueError("RSS concurrency must be positive")
         if self.max_connection_retries < 0:
             raise ValueError("RSS connection retries must not be negative")
+        if self.per_query_deadline_seconds <= 0 or self.collection_deadline_seconds <= 0:
+            raise ValueError("RSS deadlines must be positive")
 
     @property
     def timeout(self) -> httpx.Timeout:
@@ -113,6 +118,11 @@ def canonicalize_url(url: str) -> str:
         if not key.lower().startswith("utm_") and key.lower() not in TRACKING_PARAMETERS
     ]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query, doseq=True), ""))
+
+
+def normalized_query(query: str) -> str:
+    """Stable query identity used to prevent duplicate RSS requests."""
+    return " ".join(unicodedata.normalize("NFKC", query).casefold().split())
 
 
 def plain_text(value: str | None) -> str | None:
@@ -222,8 +232,16 @@ class GoogleNewsRSSCollector:
         return articles
 
     async def collect_many(self, queries: Iterable[str]) -> RSSCollectionResult:
-        """Collect explicit queries concurrently without exceeding the configured bound."""
-        query_list = list(queries)
+        """Collect unique queries within per-query and whole-run wall-clock deadlines."""
+        query_list: list[str] = []
+        seen: set[str] = set()
+        for query in queries:
+            key = normalized_query(query)
+            if not key:
+                raise ValueError("Google News RSS query must not be blank")
+            if key not in seen:
+                seen.add(key)
+                query_list.append(query.strip())
         if not query_list:
             return RSSCollectionResult(queries=())
 
@@ -239,7 +257,10 @@ class GoogleNewsRSSCollector:
                 except asyncio.QueueEmpty:
                     return
                 try:
-                    articles = await self.collect(query)
+                    articles = await asyncio.wait_for(
+                        self.collect(query),
+                        timeout=self.settings.per_query_deadline_seconds,
+                    )
                     outcomes[index] = QueryCollectionResult(
                         query=query,
                         status="success",
@@ -251,11 +272,30 @@ class GoogleNewsRSSCollector:
                     outcomes[index] = QueryCollectionResult(query=query, status="http_error", error=str(exc))
                 except QueryParseError as exc:
                     outcomes[index] = QueryCollectionResult(query=query, status="parse_error", error=str(exc))
+                except TimeoutError:
+                    outcomes[index] = QueryCollectionResult(
+                        query=query,
+                        status="timeout",
+                        error=f"Google News RSS hard deadline exceeded after {self.settings.per_query_deadline_seconds:g}s",
+                    )
                 finally:
                     queue.task_done()
 
         worker_count = min(self.settings.concurrency, len(query_list))
-        await asyncio.gather(*(worker() for _ in range(worker_count)))
+        workers = [asyncio.create_task(worker()) for _ in range(worker_count)]
+        done, pending = await asyncio.wait(workers, timeout=self.settings.collection_deadline_seconds)
+        if pending:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for index, outcome in enumerate(outcomes):
+                if outcome is None:
+                    outcomes[index] = QueryCollectionResult(
+                        query=query_list[index],
+                        status="timeout",
+                        error=f"RSS collection deadline exceeded after {self.settings.collection_deadline_seconds:g}s",
+                    )
+        await asyncio.gather(*done, return_exceptions=False)
         return RSSCollectionResult(queries=tuple(outcome for outcome in outcomes if outcome is not None))
 
     @staticmethod

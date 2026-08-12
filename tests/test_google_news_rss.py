@@ -159,3 +159,66 @@ def test_non_connection_failures_are_not_retried(failure_type: str) -> None:
     result = asyncio.run(run())
     assert attempts == 1
     assert len(result.failures) == 1
+
+
+def test_per_query_hard_timeout_does_not_block_other_queries() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params["q"] == "slow":
+            await asyncio.sleep(0.08)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        settings = RSSCollectorSettings(concurrency=2, per_query_deadline_seconds=0.02, collection_deadline_seconds=0.2)
+        collector = GoogleNewsRSSCollector(client=client, settings=settings)
+        try:
+            return await collector.collect_many(["slow", "fast"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert [item.status for item in result.queries] == ["timeout", "success"]
+    assert len(result.articles) == 1
+
+
+def test_global_deadline_cancels_unfinished_work_and_preserves_successes() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params["q"] != "fast":
+            await asyncio.sleep(0.2)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        settings = RSSCollectorSettings(concurrency=2, per_query_deadline_seconds=1.0, collection_deadline_seconds=0.04)
+        collector = GoogleNewsRSSCollector(client=client, settings=settings)
+        try:
+            return await collector.collect_many(["fast", "slow-1", "slow-2"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert result.queries[0].status == "success"
+    assert [item.status for item in result.queries[1:]] == ["timeout", "timeout"]
+    assert len(result.articles) == 1
+
+
+def test_duplicate_normalized_queries_are_fetched_once() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            return await collector.collect_many([" Example   Co ", "example co", "Ｅｘａｍｐｌｅ Ｃｏ"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert calls == 1
+    assert len(result.queries) == 1
+    assert len(result.articles) == 1

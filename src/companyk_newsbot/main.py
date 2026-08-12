@@ -14,18 +14,20 @@ def main() -> int:
     mode = os.getenv("RUN_MODE", "shadow").lower()
     if os.getenv("E2E_TEST_TRIGGER", "").strip().lower() == "true":
         mode = "e2e_test"
-    if mode not in {"local", "test", "shadow", "e2e_test", "live"}:
-        raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, or live")
+    if mode not in {"local", "test", "shadow", "e2e_test", "full_shadow", "live"}:
+        raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, full_shadow, or live")
     if mode == "live":
         raise RuntimeError("live mode is blocked until delivery is implemented and explicitly enabled")
     store = JsonStateStore(os.getenv("STATE_DIR", ".state"))
-    if mode == "e2e_test":
+    if mode in {"e2e_test", "full_shadow"}:
+        profile = "smoke" if mode == "e2e_test" else "full_shadow"
         try:
-            result = run_real_e2e(load_keyword_map(), store)
+            result = run_real_e2e(load_keyword_map(), store, profile=profile, deliver=profile == "smoke")
         except E2EExecutionError as exc:
             store.record_run(mode=mode, status="failed", details={"stage": exc.stage, "message": str(exc)})
             raise
-        store.record_run(mode=mode, status="success", details={"phase": "real_e2e_test", **result.log_payload()})
+        phase = "real_e2e_smoke" if profile == "smoke" else "full_shadow_non_delivery"
+        store.record_run(mode=mode, status="success", details={"phase": phase, **result.log_payload()})
         return 0
     if mode == "test":
         rendered = HtmlEmailRenderer().render([], report_date=date.today())

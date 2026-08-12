@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,3 +39,19 @@ def test_main_blocks_live_mode(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
     with pytest.raises(RuntimeError, match="live mode is blocked"):
         main.main()
+
+
+def test_main_full_shadow_uses_full_coverage_without_delivery(monkeypatch, tmp_path) -> None:
+    observed = {}
+
+    def fake_run(config, store, **kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(log_payload=lambda: {"profile": kwargs["profile"]})
+
+    monkeypatch.setenv("RUN_MODE", "full_shadow")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(main, "run_real_e2e", fake_run)
+
+    assert main.main() == 0
+    assert observed == {"profile": "full_shadow", "deliver": False}
+    assert JsonStateStore(tmp_path).load().run_ledger[-1]["phase"] == "full_shadow_non_delivery"

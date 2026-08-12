@@ -1,17 +1,19 @@
-"""Real, test-recipient-only end-to-end execution for the newsbot."""
+"""Real smoke and non-delivery full-shadow execution for the newsbot."""
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 import asyncio
 import hashlib
 import json
 import os
+from time import monotonic
+from typing import Literal
 from zoneinfo import ZoneInfo
 
-from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector
+from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
@@ -23,13 +25,15 @@ from companyk_newsbot.state import JsonStateStore
 
 TEST_RECIPIENT = "jeremy.cheon@pm.me"
 KST = ZoneInfo("Asia/Seoul")
-MAX_JUDGE_CALLS = 25
-MAX_DIRECT_QUERIES = 20
-MAX_EXPOSURE_QUERIES = 20
+DEFAULT_SMOKE_DIRECT_QUERY_CAP = 8
+DEFAULT_SMOKE_EXPOSURE_QUERY_CAP = 8
+SMOKE_MAX_JUDGE_CALLS = 25
+DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
+ExecutionProfile = Literal["smoke", "full_shadow"]
 
 
 class E2EExecutionError(RuntimeError):
-    """Adds a clear pipeline-stage boundary to a real E2E failure."""
+    """Adds a clear pipeline-stage boundary to a real execution failure."""
 
     def __init__(self, stage: str, message: str) -> None:
         super().__init__(f"E2E failed at {stage}: {message}")
@@ -37,11 +41,26 @@ class E2EExecutionError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class E2EQueryPlan:
+    profile: ExecutionProfile
+    direct_queries: tuple[str, ...]
+    exposure_queries: tuple[str, ...]
+    queries: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class E2EResult:
-    collected: int
+    profile: ExecutionProfile
+    query_count: int
+    collection_successes: int
     collection_failures: int
+    collection_seconds: float
+    collected: int
+    same_day_articles: int
+    dedup_seconds: float
     article_deduped: int
     article_duplicates: int
+    routing_seconds: float
     route_a_matches: int
     route_a_events: int
     route_b_candidates: int
@@ -50,12 +69,106 @@ class E2EResult:
     reject_reasons: dict[str, int]
     final_items: int
     already_sent: int
+    same_run_duplicates: int
+    openai_model: str
+    judge_seconds: float
     judge_calls: int
+    summary_seconds: float
     summary_calls: int
-    delivery_id: str
+    email_seconds: float
+    total_seconds: float
+    delivery_id: str | None
 
     def log_payload(self) -> dict[str, object]:
         return self.__dict__.copy()
+
+
+def _seconds(started_at: float) -> float:
+    return round(monotonic() - started_at, 3)
+
+
+def _positive_int_from_environment(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise E2EExecutionError("configuration", f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise E2EExecutionError("configuration", f"{name} must be a positive integer")
+    return value
+
+
+def _deterministic_sample(values: tuple[str, ...], cap: int, *, namespace: str) -> tuple[str, ...]:
+    """Select a stable, order-independent slice instead of the YAML's first entries."""
+    if len(values) <= cap:
+        return values
+    return tuple(
+        sorted(
+            values,
+            key=lambda value: (
+                hashlib.sha256(f"{namespace}|{normalized_query(value)}".encode("utf-8")).hexdigest(),
+                normalized_query(value),
+            ),
+        )[:cap]
+    )
+
+
+def build_query_plan(
+    config: KeywordMapConfig,
+    *,
+    profile: ExecutionProfile,
+    direct_cap: int | None = None,
+    exposure_cap: int | None = None,
+) -> E2EQueryPlan:
+    """Build smoke samples or full coverage, then de-duplicate requests across both routes."""
+    registry = ExposureRegistry(config)
+    all_direct = tuple(config.company_rules)
+    all_exposure = tuple(query.query for query in registry.queries)
+    if profile == "smoke":
+        direct_limit = (
+            direct_cap
+            if direct_cap is not None
+            else _positive_int_from_environment("E2E_DIRECT_QUERY_CAP", DEFAULT_SMOKE_DIRECT_QUERY_CAP)
+        )
+        exposure_limit = (
+            exposure_cap
+            if exposure_cap is not None
+            else _positive_int_from_environment("E2E_EXPOSURE_QUERY_CAP", DEFAULT_SMOKE_EXPOSURE_QUERY_CAP)
+        )
+        if direct_limit < 1 or exposure_limit < 1:
+            raise E2EExecutionError("configuration", "smoke query caps must be positive")
+        direct_queries = _deterministic_sample(all_direct, direct_limit, namespace="route_a")
+        exposure_queries = _deterministic_sample(all_exposure, exposure_limit, namespace="route_b")
+    elif profile == "full_shadow":
+        direct_queries = all_direct
+        exposure_queries = all_exposure
+    else:  # pragma: no cover - guarded by the type and main entry point
+        raise E2EExecutionError("configuration", f"unknown execution profile: {profile}")
+
+    queries: list[str] = []
+    seen: set[str] = set()
+    for query in (*direct_queries, *exposure_queries):
+        key = normalized_query(query)
+        if key not in seen:
+            seen.add(key)
+            queries.append(query)
+    return E2EQueryPlan(profile, direct_queries, exposure_queries, tuple(queries))
+
+
+def _assert_test_recipient(settings: ResendSettings) -> None:
+    if settings.recipient.casefold() != TEST_RECIPIENT:
+        raise E2EExecutionError("safety_check", f"smoke E2E may send only to {TEST_RECIPIENT}")
+
+
+def _openai_timeout_seconds() -> float:
+    raw = os.getenv("OPENAI_TIMEOUT_SECONDS", str(DEFAULT_OPENAI_TIMEOUT_SECONDS)).strip()
+    try:
+        timeout = float(raw)
+    except ValueError as exc:
+        raise E2EExecutionError("configuration", "OPENAI_TIMEOUT_SECONDS must be positive") from exc
+    if timeout <= 0:
+        raise E2EExecutionError("configuration", "OPENAI_TIMEOUT_SECONDS must be positive")
+    return timeout
 
 
 def _fingerprint(item: RankedNewsItem) -> tuple[str, str]:
@@ -68,89 +181,114 @@ def _log(event: str, **fields: object) -> None:
     print(json.dumps({"event": event, **fields}, ensure_ascii=False, sort_keys=True))
 
 
-def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date | None = None) -> E2EResult:
-    """Run the real data path and deliver only to the fixed test recipient."""
-    report_date = today or date.today()
-    settings = ResendSettings.from_environment()
-    if settings.recipient.casefold() != TEST_RECIPIENT:
-        raise E2EExecutionError("safety_check", f"e2e_test may send only to {TEST_RECIPIENT}")
+def run_real_e2e(
+    config: KeywordMapConfig,
+    store: JsonStateStore,
+    *,
+    today: date | None = None,
+    profile: ExecutionProfile = "smoke",
+    deliver: bool = True,
+) -> E2EResult:
+    """Run real services; only smoke may deliver, and only to the fixed test recipient."""
+    total_started = monotonic()
+    report_date = today or datetime.now(KST).date()
+    if deliver and profile != "smoke":
+        raise E2EExecutionError("safety_check", "full_shadow is a non-delivery profile")
+    settings = ResendSettings.from_environment() if deliver else None
+    if settings is not None:
+        _assert_test_recipient(settings)
 
     registry = ExposureRegistry(config)
-    direct_queries = tuple(config.company_rules)[:MAX_DIRECT_QUERIES]
-    exposure_queries = tuple(query.query for query in registry.queries)[:MAX_EXPOSURE_QUERIES]
+    query_plan = build_query_plan(config, profile=profile)
     _log(
         "queries_prepared",
-        direct=len(direct_queries),
-        external=len(exposure_queries),
-        direct_cap=MAX_DIRECT_QUERIES,
-        external_cap=MAX_EXPOSURE_QUERIES,
+        profile=profile,
+        direct=len(query_plan.direct_queries),
+        external=len(query_plan.exposure_queries),
+        query_count=len(query_plan.queries),
     )
 
-    collected = []
-    collection_failures: list[dict[str, str]] = []
+    collection_started = monotonic()
     try:
-        async def collect_all() -> list:
+        async def collect_all():
             async with GoogleNewsRSSCollector() as collector:
-                direct_result = await collector.collect_many(direct_queries)
-                external_result = await collector.collect_many(exposure_queries)
-                for route, result in (("direct", direct_result), ("external", external_result)):
-                    _log(
-                        "collection_route",
-                        route=route,
-                        queries=len(result.queries),
-                        successes=len(result.successes),
-                        failures=len(result.failures),
-                        articles=len(result.articles),
-                    )
-                    for failure in result.failures:
-                        failure_record = {
-                            "route": route,
-                            "query": failure.query,
-                            "status": failure.status,
-                            "reason": failure.error or failure.status,
-                        }
-                        collection_failures.append(failure_record)
-                        _log("collection_query_failed", **failure_record)
-                return [*direct_result.articles, *external_result.articles]
+                return await collector.collect_many(query_plan.queries)
 
-        collected = asyncio.run(collect_all())
+        collection_result = asyncio.run(collect_all())
     except Exception as exc:
         raise E2EExecutionError("collection", str(exc)) from exc
+    collection_seconds = _seconds(collection_started)
+    for failure in collection_result.failures:
+        _log(
+            "collection_query_failed",
+            query=failure.query,
+            status=failure.status,
+            reason=failure.error or failure.status,
+        )
+    collected = list(collection_result.articles)
     collected_today = [
         article
         for article in collected
         if article.published_at is not None and article.published_at.astimezone(KST).date() == report_date
     ]
-    _log("collection_complete", collected=len(collected), same_day=len(collected_today), failures=len(collection_failures))
+    _log(
+        "collection_complete",
+        query_count=len(query_plan.queries),
+        collection_seconds=collection_seconds,
+        collection_successes=len(collection_result.successes),
+        collection_failures=len(collection_result.failures),
+        articles_collected=len(collected),
+        same_day_articles=len(collected_today),
+    )
 
+    dedup_started = monotonic()
     try:
         article_dedup = ArticleDeduplicator().deduplicate(collected_today)
+    except Exception as exc:
+        raise E2EExecutionError("article_dedup", str(exc)) from exc
+    dedup_seconds = _seconds(dedup_started)
+    article_duplicates = sum(len(group.duplicates) for group in article_dedup.duplicate_groups)
+    _log(
+        "dedup_complete",
+        dedup_seconds=dedup_seconds,
+        article_deduped=len(article_dedup.articles),
+        article_duplicates=article_duplicates,
+    )
+
+    routing_started = monotonic()
+    try:
         detector = RouteADetector(config)
         route_a_matches = [match for article in article_dedup.articles for match in detector.detect(article)]
         route_a_events = RouteAEventClusterer().cluster(route_a_matches)
         candidate_result = RouteBCandidateGenerator(registry).generate(article_dedup.articles)
     except Exception as exc:
         raise E2EExecutionError("deterministic_routing", str(exc)) from exc
-
+    routing_seconds = _seconds(routing_started)
     reasons = Counter(rejection.reason for rejection in candidate_result.rejections)
     _log(
-        "deterministic_complete",
-        article_deduped=len(article_dedup.articles),
-        article_duplicates=sum(len(group.duplicates) for group in article_dedup.duplicate_groups),
+        "routing_complete",
+        routing_seconds=routing_seconds,
         route_a_matches=len(route_a_matches),
         route_a_events=len(route_a_events),
         route_b_candidates=len(candidate_result.candidates),
+        route_b_prefilter_rejections=len(candidate_result.rejections),
         route_b_reject_reasons=dict(reasons),
     )
 
-    judge = RouteBCausalMaterialityJudge.from_environment()
+    judge_started = monotonic()
     judged = []
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol").strip()
     try:
-        candidates_to_judge = candidate_result.candidates[:MAX_JUDGE_CALLS]
-        skipped_for_cap = candidate_result.candidates[MAX_JUDGE_CALLS:]
+        judge = RouteBCausalMaterialityJudge.from_environment(timeout=_openai_timeout_seconds())
+        if profile == "smoke":
+            candidates_to_judge = candidate_result.candidates[:SMOKE_MAX_JUDGE_CALLS]
+            skipped_for_cap = candidate_result.candidates[SMOKE_MAX_JUDGE_CALLS:]
+        else:
+            candidates_to_judge = candidate_result.candidates
+            skipped_for_cap = ()
         if skipped_for_cap:
-            reasons["e2e_judge_cap"] += len(skipped_for_cap)
-            _log("route_b_judge_cap", max_calls=MAX_JUDGE_CALLS, skipped=len(skipped_for_cap))
+            reasons["smoke_judge_cap"] += len(skipped_for_cap)
+            _log("route_b_judge_cap", max_calls=SMOKE_MAX_JUDGE_CALLS, skipped=len(skipped_for_cap))
         for candidate in candidates_to_judge:
             result = judge.judge(candidate)
             judged.append(result)
@@ -158,53 +296,111 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
                 reasons[f"judge:{result.decision.rejection_reason}"] += 1
     except Exception as exc:
         raise E2EExecutionError("route_b_openai_judge", str(exc)) from exc
-
+    judge_seconds = _seconds(judge_started)
     accepted = [result for result in judged if result.decision.qualifies]
+    _log(
+        "judge_complete",
+        openai_model=openai_model,
+        judge_seconds=judge_seconds,
+        judge_calls=len(judged),
+        route_b_accepted=len(accepted),
+        route_b_judge_rejected=len(judged) - len(accepted),
+    )
+
     ranked = NewsRanker().rank(
-        [*(RankedNewsItem.from_direct(event.primary) for event in route_a_events), *(RankedNewsItem.from_external(result) for result in accepted)]
+        [
+            *(RankedNewsItem.from_direct(event.primary) for event in route_a_events),
+            *(RankedNewsItem.from_external(result) for result in accepted),
+        ]
     )
     unsent: list[RankedNewsItem] = []
     already_sent = 0
+    same_run_duplicates = 0
+    seen_run_fingerprints: set[tuple[str, str]] = set()
     for item in ranked:
-        kind, fingerprint = _fingerprint(item)
+        identity = _fingerprint(item)
+        if identity in seen_run_fingerprints:
+            same_run_duplicates += 1
+            continue
+        seen_run_fingerprints.add(identity)
+        kind, fingerprint = identity
         if store.was_sent(fingerprint, kind=kind):
             already_sent += 1
         else:
             unsent.append(item)
-    _log("ranking_complete", ranked=len(ranked), unsent=len(unsent), already_sent=already_sent)
+    _log(
+        "ranking_complete",
+        ranked=len(ranked),
+        final_items=len(unsent),
+        already_sent=already_sent,
+        same_run_duplicates=same_run_duplicates,
+    )
 
+    summary_started = monotonic()
     try:
         from openai import OpenAI
 
         summarizer = NewsSummarizer(
-            OpenAI(),
+            OpenAI(timeout=_openai_timeout_seconds()),
             model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol"),
             reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
         )
         email_items = [EmailNewsItem(item, summarizer.summarize(item)) for item in unsent]
-        rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
     except Exception as exc:
-        raise E2EExecutionError("openai_summary_or_email_render", str(exc)) from exc
+        raise E2EExecutionError("openai_summary", str(exc)) from exc
+    summary_seconds = _seconds(summary_started)
+    _log("summary_complete", summary_seconds=summary_seconds, summary_calls=len(email_items))
 
+    email_started = monotonic()
+    delivery_id: str | None = None
     try:
-        sender = ResendEmailSender(settings)
-        try:
-            delivery_id = sender.send(rendered)
-        finally:
-            sender.close()
+        rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
+        if settings is not None:
+            sender = ResendEmailSender(settings)
+            try:
+                delivery_id = sender.send(rendered)
+            finally:
+                sender.close()
     except Exception as exc:
-        raise E2EExecutionError("resend_delivery", str(exc)) from exc
+        stage = "resend_delivery" if settings is not None else "email_render"
+        raise E2EExecutionError(stage, str(exc)) from exc
+    email_seconds = _seconds(email_started)
+    _log("email_complete", email_seconds=email_seconds, delivered=delivery_id is not None)
 
-    for item in unsent:
-        kind, fingerprint = _fingerprint(item)
-        store.mark_sent(fingerprint, kind=kind)
+    if delivery_id is not None:
+        for item in unsent:
+            kind, fingerprint = _fingerprint(item)
+            store.mark_sent(fingerprint, kind=kind)
+
     result = E2EResult(
-        collected=len(collected), collection_failures=len(collection_failures), article_deduped=len(article_dedup.articles),
-        article_duplicates=sum(len(group.duplicates) for group in article_dedup.duplicate_groups),
-        route_a_matches=len(route_a_matches), route_a_events=len(route_a_events), route_b_candidates=len(candidate_result.candidates),
-        route_b_accepted=len(accepted), route_b_rejected=len(candidate_result.rejections) + len(judged) - len(accepted) + len(skipped_for_cap),
-        reject_reasons=dict(reasons), final_items=len(unsent), already_sent=already_sent,
-        judge_calls=len(judged), summary_calls=len(email_items), delivery_id=delivery_id,
+        profile=profile,
+        query_count=len(query_plan.queries),
+        collection_successes=len(collection_result.successes),
+        collection_failures=len(collection_result.failures),
+        collection_seconds=collection_seconds,
+        collected=len(collected),
+        same_day_articles=len(collected_today),
+        dedup_seconds=dedup_seconds,
+        article_deduped=len(article_dedup.articles),
+        article_duplicates=article_duplicates,
+        routing_seconds=routing_seconds,
+        route_a_matches=len(route_a_matches),
+        route_a_events=len(route_a_events),
+        route_b_candidates=len(candidate_result.candidates),
+        route_b_accepted=len(accepted),
+        route_b_rejected=len(candidate_result.rejections) + len(judged) - len(accepted) + len(skipped_for_cap),
+        reject_reasons=dict(reasons),
+        final_items=len(unsent),
+        already_sent=already_sent,
+        same_run_duplicates=same_run_duplicates,
+        openai_model=openai_model,
+        judge_seconds=judge_seconds,
+        judge_calls=len(judged),
+        summary_seconds=summary_seconds,
+        summary_calls=len(email_items),
+        email_seconds=email_seconds,
+        total_seconds=_seconds(total_started),
+        delivery_id=delivery_id,
     )
     _log("e2e_complete", **result.log_payload())
     return result

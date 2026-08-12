@@ -83,13 +83,14 @@ class RouteBCausalMaterialityJudge:
         self.reasoning_effort = reasoning_effort
 
     @classmethod
-    def from_environment(cls) -> "RouteBCausalMaterialityJudge":
+    def from_environment(cls, *, timeout: float | None = None) -> "RouteBCausalMaterialityJudge":
         model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol").strip()
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - dependency installation is verified separately
             raise JudgeError("OpenAI SDK is not installed") from exc
-        return cls(OpenAI(), model=model, reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
+        client = OpenAI(timeout=timeout) if timeout is not None else OpenAI()
+        return cls(client, model=model, reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"))
 
     def judge(self, candidate: RouteBCandidate) -> JudgedRouteBCandidate:
         response = self._client.responses.parse(
