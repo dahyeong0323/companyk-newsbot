@@ -14,6 +14,8 @@ class RunState:
     sent_article_fingerprints: list[str] = field(default_factory=list)
     sent_event_fingerprints: list[str] = field(default_factory=list)
     last_successful_run: str | None = None
+    last_successful_delivery_run: str | None = None
+    last_shadow_run: str | None = None
     run_ledger: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -38,14 +40,37 @@ class JsonStateStore:
         temporary.write_text(json.dumps(state.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self.path)
 
-    def record_run(self, *, mode: str, status: str, details: dict[str, Any] | None = None) -> RunState:
+    def record_run(
+        self,
+        *,
+        mode: str,
+        status: str,
+        details: dict[str, Any] | None = None,
+        checkpoint: str | None = None,
+        at: datetime | None = None,
+    ) -> RunState:
         state = self.load()
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = (at or datetime.now(UTC)).astimezone(UTC).isoformat()
         state.run_ledger = [*state.run_ledger[-49:], {"timestamp": timestamp, "mode": mode, "status": status, **(details or {})}]
         if status == "success":
             state.last_successful_run = timestamp
+            if checkpoint == "delivery":
+                state.last_successful_delivery_run = timestamp
+            elif checkpoint == "shadow":
+                state.last_shadow_run = timestamp
+        elif checkpoint is not None:
+            raise ValueError("failed or inconclusive runs cannot advance a checkpoint")
         self.save(state)
         return state
+
+    def last_delivery_datetime(self) -> datetime | None:
+        value = self.load().last_successful_delivery_run
+        if value is None:
+            return None
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            raise RuntimeError("last successful delivery checkpoint must be timezone-aware")
+        return parsed.astimezone(UTC)
 
     def was_sent(self, fingerprint: str, *, kind: str) -> bool:
         state = self.load()

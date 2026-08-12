@@ -157,6 +157,7 @@ class GoogleNewsRSSCollector:
         language: str = "en-US",
         country: str = "US",
         settings: RSSCollectorSettings | None = None,
+        freshness_hint: str | None = None,
     ) -> None:
         self.settings = settings or RSSCollectorSettings()
         self._client = client or httpx.AsyncClient(
@@ -168,6 +169,9 @@ class GoogleNewsRSSCollector:
         self._now = now or (lambda: datetime.now(UTC))
         self.language = language
         self.country = country
+        self.freshness_hint = freshness_hint.strip() if freshness_hint else None
+        if self.freshness_hint and not re.fullmatch(r"when:\d+[hd]", self.freshness_hint):
+            raise ValueError("Google News freshness hint must look like when:2d or when:24h")
 
     async def close(self) -> None:
         if self._owns_client:
@@ -183,7 +187,8 @@ class GoogleNewsRSSCollector:
         query = query.strip()
         if not query:
             raise ValueError("Google News RSS query must not be blank")
-        params = {"q": query, "hl": self.language, "gl": self.country, "ceid": f"{self.country}:en"}
+        runtime_query = f"{query} {self.freshness_hint}" if self.freshness_hint else query
+        params = {"q": runtime_query, "hl": self.language, "gl": self.country, "ceid": f"{self.country}:en"}
         connection_failures = 0
         while True:
             try:

@@ -27,8 +27,14 @@ def main() -> int:
             store.record_run(mode=mode, status="failed", details={"stage": exc.stage, "message": str(exc)})
             raise
         phase = "real_e2e_smoke" if profile == "smoke" else "full_shadow_non_delivery"
-        store.record_run(mode=mode, status="success", details={"phase": phase, **result.log_payload()})
-        return 0
+        checkpoint = "shadow" if profile == "full_shadow" and result.status == "success" else None
+        store.record_run(
+            mode=mode,
+            status=result.status,
+            details={"phase": phase, **result.log_payload()},
+            checkpoint=checkpoint,
+        )
+        return 0 if result.status == "success" else 2
     if mode == "test":
         rendered = HtmlEmailRenderer().render([], report_date=date.today())
         sender = ResendEmailSender(ResendSettings.from_environment())

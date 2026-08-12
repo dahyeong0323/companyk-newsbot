@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,22 @@ def test_json_state_store_persists_run_ledger_atomically(tmp_path) -> None:
     loaded = store.load()
     assert loaded.run_ledger[-1]["items"] == 2
     assert json.loads(store.path.read_text(encoding="utf-8"))["last_successful_run"]
+
+
+def test_only_successful_delivery_advances_production_checkpoint(tmp_path) -> None:
+    store = JsonStateStore(tmp_path)
+    first = datetime(2026, 8, 12, 1, tzinfo=UTC)
+    delivered = datetime(2026, 8, 12, 5, tzinfo=UTC)
+
+    store.record_run(mode="live", status="failed", at=first)
+    store.record_run(mode="e2e_test", status="success", at=first)
+    store.record_run(mode="full_shadow", status="success", checkpoint="shadow", at=first)
+    assert store.last_delivery_datetime() is None
+
+    state = store.record_run(mode="live", status="success", checkpoint="delivery", at=delivered)
+    assert state.last_successful_delivery_run == delivered.isoformat()
+    assert state.last_shadow_run == first.isoformat()
+    assert store.last_delivery_datetime() == delivered
 
 
 def test_state_store_retains_sent_fingerprints_for_idempotency(tmp_path) -> None:
@@ -46,7 +63,7 @@ def test_main_full_shadow_uses_full_coverage_without_delivery(monkeypatch, tmp_p
 
     def fake_run(config, store, **kwargs):
         observed.update(kwargs)
-        return SimpleNamespace(log_payload=lambda: {"profile": kwargs["profile"]})
+        return SimpleNamespace(status="success", log_payload=lambda: {"profile": kwargs["profile"]})
 
     monkeypatch.setenv("RUN_MODE", "full_shadow")
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
@@ -55,3 +72,21 @@ def test_main_full_shadow_uses_full_coverage_without_delivery(monkeypatch, tmp_p
     assert main.main() == 0
     assert observed == {"profile": "full_shadow", "deliver": False}
     assert JsonStateStore(tmp_path).load().run_ledger[-1]["phase"] == "full_shadow_non_delivery"
+
+
+def test_main_records_inconclusive_smoke_without_checkpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("RUN_MODE", "e2e_test")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        main,
+        "run_real_e2e",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="inconclusive",
+            log_payload=lambda: {"status": "inconclusive", "final_items": 0},
+        ),
+    )
+
+    assert main.main() == 2
+    state = JsonStateStore(tmp_path).load()
+    assert state.run_ledger[-1]["status"] == "inconclusive"
+    assert state.last_successful_delivery_run is None

@@ -41,6 +41,28 @@ def test_collects_and_normalizes_google_news_items() -> None:
     assert article.retrieved_at == datetime(2026, 8, 12, 7, 0, tzinfo=UTC)
 
 
+@pytest.mark.parametrize("hint", ["when:2d", "when:7d"])
+def test_runtime_freshness_hint_is_sent_without_changing_base_query_metadata(hint: str) -> None:
+    observed_query = None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal observed_query
+        observed_query = request.url.params["q"]
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, freshness_hint=hint)
+        try:
+            return await collector.collect("Example Co")
+        finally:
+            await client.aclose()
+
+    articles = asyncio.run(run())
+    assert observed_query == f"Example Co {hint}"
+    assert articles[0].origin_metadata["query"] == "Example Co"
+
+
 def test_collect_rejects_blank_query() -> None:
     with pytest.raises(ValueError, match="must not be blank"):
         asyncio.run(collector_for(RSS_BODY).collect("  "))

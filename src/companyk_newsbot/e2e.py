@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, datetime
 import asyncio
 import hashlib
 import json
@@ -17,6 +17,7 @@ from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, 
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
+from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.judges import NewsSummarizer, RouteBCausalMaterialityJudge
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
@@ -29,6 +30,9 @@ DEFAULT_SMOKE_DIRECT_QUERY_CAP = 8
 DEFAULT_SMOKE_EXPOSURE_QUERY_CAP = 8
 SMOKE_MAX_JUDGE_CALLS = 25
 DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
+DEFAULT_SMOKE_LOOKBACK_DAYS = 7
+DEFAULT_FIRST_RUN_HOURS = 30
+DEFAULT_OVERLAP_HOURS = 2
 ExecutionProfile = Literal["smoke", "full_shadow"]
 
 
@@ -50,13 +54,20 @@ class E2EQueryPlan:
 
 @dataclass(frozen=True)
 class E2EResult:
+    status: Literal["success", "inconclusive"]
     profile: ExecutionProfile
     query_count: int
     collection_successes: int
     collection_failures: int
     collection_seconds: float
     collected: int
-    same_day_articles: int
+    freshness_window_start: str
+    freshness_window_end: str
+    freshness_mode: str
+    freshness_accepted: int
+    freshness_rejected_too_old: int
+    freshness_rejected_future: int
+    freshness_rejected_missing_timestamp: int
     dedup_seconds: float
     article_deduped: int
     article_duplicates: int
@@ -185,13 +196,14 @@ def run_real_e2e(
     config: KeywordMapConfig,
     store: JsonStateStore,
     *,
-    today: date | None = None,
+    now: datetime | None = None,
     profile: ExecutionProfile = "smoke",
     deliver: bool = True,
 ) -> E2EResult:
     """Run real services; only smoke may deliver, and only to the fixed test recipient."""
     total_started = monotonic()
-    report_date = today or datetime.now(KST).date()
+    run_time = (now or datetime.now(UTC)).astimezone(UTC)
+    report_date = run_time.astimezone(KST).date()
     if deliver and profile != "smoke":
         raise E2EExecutionError("safety_check", "full_shadow is a non-delivery profile")
     settings = ResendSettings.from_environment() if deliver else None
@@ -200,6 +212,20 @@ def run_real_e2e(
 
     registry = ExposureRegistry(config)
     query_plan = build_query_plan(config, profile=profile)
+    if profile == "smoke":
+        smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
+        freshness_window = smoke_window(now=run_time, lookback_days=smoke_days)
+        freshness_hint = f"when:{smoke_days}d"
+    else:
+        first_run_hours = _positive_int_from_environment("FRESHNESS_FIRST_RUN_HOURS", DEFAULT_FIRST_RUN_HOURS)
+        overlap_hours = _positive_int_from_environment("FRESHNESS_OVERLAP_HOURS", DEFAULT_OVERLAP_HOURS)
+        freshness_window = delivery_window(
+            now=run_time,
+            last_successful_delivery_run=store.last_delivery_datetime(),
+            overlap_hours=overlap_hours,
+            first_run_hours=first_run_hours,
+        )
+        freshness_hint = "when:2d"
     _log(
         "queries_prepared",
         profile=profile,
@@ -211,7 +237,7 @@ def run_real_e2e(
     collection_started = monotonic()
     try:
         async def collect_all():
-            async with GoogleNewsRSSCollector() as collector:
+            async with GoogleNewsRSSCollector(freshness_hint=freshness_hint) as collector:
                 return await collector.collect_many(query_plan.queries)
 
         collection_result = asyncio.run(collect_all())
@@ -226,11 +252,8 @@ def run_real_e2e(
             reason=failure.error or failure.status,
         )
     collected = list(collection_result.articles)
-    collected_today = [
-        article
-        for article in collected
-        if article.published_at is not None and article.published_at.astimezone(KST).date() == report_date
-    ]
+    freshness = filter_articles(collected, window=freshness_window)
+    fresh_articles = list(freshness.accepted)
     _log(
         "collection_complete",
         query_count=len(query_plan.queries),
@@ -238,12 +261,18 @@ def run_real_e2e(
         collection_successes=len(collection_result.successes),
         collection_failures=len(collection_result.failures),
         articles_collected=len(collected),
-        same_day_articles=len(collected_today),
+        freshness_window_start=freshness.window.start.isoformat(),
+        freshness_window_end=freshness.window.end.isoformat(),
+        freshness_mode=freshness.window.mode,
+        freshness_accepted=len(fresh_articles),
+        freshness_rejected_too_old=freshness.rejected_too_old,
+        freshness_rejected_future=freshness.rejected_future,
+        freshness_rejected_missing_timestamp=freshness.rejected_missing_timestamp,
     )
 
     dedup_started = monotonic()
     try:
-        article_dedup = ArticleDeduplicator().deduplicate(collected_today)
+        article_dedup = ArticleDeduplicator().deduplicate(fresh_articles)
     except Exception as exc:
         raise E2EExecutionError("article_dedup", str(exc)) from exc
     dedup_seconds = _seconds(dedup_started)
@@ -336,36 +365,50 @@ def run_real_e2e(
         same_run_duplicates=same_run_duplicates,
     )
 
-    summary_started = monotonic()
-    try:
-        from openai import OpenAI
-
-        summarizer = NewsSummarizer(
-            OpenAI(timeout=_openai_timeout_seconds()),
-            model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol"),
-            reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
-        )
-        email_items = [EmailNewsItem(item, summarizer.summarize(item)) for item in unsent]
-    except Exception as exc:
-        raise E2EExecutionError("openai_summary", str(exc)) from exc
-    summary_seconds = _seconds(summary_started)
-    _log("summary_complete", summary_seconds=summary_seconds, summary_calls=len(email_items))
-
-    email_started = monotonic()
+    status: Literal["success", "inconclusive"] = "success"
+    email_items: list[EmailNewsItem] = []
+    summary_seconds = 0.0
+    email_seconds = 0.0
     delivery_id: str | None = None
-    try:
-        rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
-        if settings is not None:
-            sender = ResendEmailSender(settings)
-            try:
-                delivery_id = sender.send(rendered)
-            finally:
-                sender.close()
-    except Exception as exc:
-        stage = "resend_delivery" if settings is not None else "email_render"
-        raise E2EExecutionError(stage, str(exc)) from exc
-    email_seconds = _seconds(email_started)
-    _log("email_complete", email_seconds=email_seconds, delivered=delivery_id is not None)
+    if profile == "smoke" and not unsent:
+        status = "inconclusive"
+        _log(
+            "e2e_inconclusive_no_items",
+            freshness_accepted=len(fresh_articles),
+            ranked=len(ranked),
+            final_items=0,
+            email_delivery="skipped",
+        )
+    else:
+        summary_started = monotonic()
+        try:
+            from openai import OpenAI
+
+            summarizer = NewsSummarizer(
+                OpenAI(timeout=_openai_timeout_seconds()),
+                model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol"),
+                reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
+            )
+            email_items = [EmailNewsItem(item, summarizer.summarize(item)) for item in unsent]
+        except Exception as exc:
+            raise E2EExecutionError("openai_summary", str(exc)) from exc
+        summary_seconds = _seconds(summary_started)
+        _log("summary_complete", summary_seconds=summary_seconds, summary_calls=len(email_items))
+
+        email_started = monotonic()
+        try:
+            rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
+            if settings is not None:
+                sender = ResendEmailSender(settings)
+                try:
+                    delivery_id = sender.send(rendered)
+                finally:
+                    sender.close()
+        except Exception as exc:
+            stage = "resend_delivery" if settings is not None else "email_render"
+            raise E2EExecutionError(stage, str(exc)) from exc
+        email_seconds = _seconds(email_started)
+        _log("email_complete", email_seconds=email_seconds, delivered=delivery_id is not None)
 
     if delivery_id is not None:
         for item in unsent:
@@ -373,13 +416,20 @@ def run_real_e2e(
             store.mark_sent(fingerprint, kind=kind)
 
     result = E2EResult(
+        status=status,
         profile=profile,
         query_count=len(query_plan.queries),
         collection_successes=len(collection_result.successes),
         collection_failures=len(collection_result.failures),
         collection_seconds=collection_seconds,
         collected=len(collected),
-        same_day_articles=len(collected_today),
+        freshness_window_start=freshness.window.start.isoformat(),
+        freshness_window_end=freshness.window.end.isoformat(),
+        freshness_mode=freshness.window.mode,
+        freshness_accepted=len(fresh_articles),
+        freshness_rejected_too_old=freshness.rejected_too_old,
+        freshness_rejected_future=freshness.rejected_future,
+        freshness_rejected_missing_timestamp=freshness.rejected_missing_timestamp,
         dedup_seconds=dedup_seconds,
         article_deduped=len(article_dedup.articles),
         article_duplicates=article_duplicates,
