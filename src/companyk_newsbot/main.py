@@ -12,6 +12,8 @@ from .state import JsonStateStore
 def main() -> int:
     load_keyword_map()
     mode = os.getenv("RUN_MODE", "shadow").lower()
+    if os.getenv("E2E_TEST_TRIGGER", "").strip().lower() == "true":
+        mode = "e2e_test"
     if mode not in {"local", "test", "shadow", "e2e_test", "live"}:
         raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, or live")
     if mode == "live":
