@@ -11,6 +11,7 @@ import json
 import os
 from time import monotonic
 from typing import Literal
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
@@ -19,7 +20,7 @@ from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
-from companyk_newsbot.judges import NewsSummarizer, RouteBCausalMaterialityJudge
+from companyk_newsbot.judges import NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
 from companyk_newsbot.state import JsonStateStore
@@ -88,6 +89,7 @@ class E2EResult:
     openai_model: str
     judge_seconds: float
     judge_calls: int
+    cascade_metrics: dict[str, object]
     summary_seconds: float
     summary_calls: int
     render_seconds: float
@@ -318,9 +320,9 @@ def run_real_e2e(
 
     judge_started = monotonic()
     judged = []
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-5.6-sol").strip()
+    cascade_metrics: dict[str, object] = {}
+    openai_model = os.getenv("ROUTE_B_PRIMARY_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-sol")).strip()
     try:
-        judge = RouteBCausalMaterialityJudge.from_environment(timeout=_openai_timeout_seconds())
         if profile == "smoke":
             candidates_to_judge = candidate_result.candidates[:SMOKE_MAX_JUDGE_CALLS]
             skipped_for_cap = candidate_result.candidates[SMOKE_MAX_JUDGE_CALLS:]
@@ -330,11 +332,22 @@ def run_real_e2e(
         if skipped_for_cap:
             reasons["smoke_judge_cap"] += len(skipped_for_cap)
             _log("route_b_judge_cap", max_calls=SMOKE_MAX_JUDGE_CALLS, skipped=len(skipped_for_cap))
-        for candidate in candidates_to_judge:
-            result = judge.judge(candidate)
-            judged.append(result)
-            if not result.decision.qualifies:
-                reasons[f"judge:{result.decision.rejection_reason}"] += 1
+        if profile == "full_shadow":
+            cascade = RouteBCascadeJudge.from_environment()
+            judged = cascade.judge_all_sync(candidates_to_judge)
+            cascade_metrics = cascade.metrics.payload()
+            for result in judged:
+                if result.audit.get("final_decision_source") == "unresolved":
+                    reasons["judge:unresolved"] += 1
+                elif not result.decision.qualifies:
+                    reasons[f"judge:{result.decision.rejection_reason}"] += 1
+        else:
+            judge = RouteBCausalMaterialityJudge.from_environment(timeout=_openai_timeout_seconds())
+            for candidate in candidates_to_judge:
+                result = judge.judge(candidate)
+                judged.append(result)
+                if not result.decision.qualifies:
+                    reasons[f"judge:{result.decision.rejection_reason}"] += 1
     except Exception as exc:
         raise E2EExecutionError("route_b_openai_judge", str(exc)) from exc
     judge_seconds = _seconds(judge_started)
@@ -346,6 +359,7 @@ def run_real_e2e(
         judge_calls=len(judged),
         route_b_accepted=len(accepted),
         route_b_judge_rejected=len(judged) - len(accepted),
+        **cascade_metrics,
     )
 
     ranked = NewsRanker().rank(
@@ -442,12 +456,17 @@ def run_real_e2e(
     artifact_json_path: str | None = None
     artifact_html_path: str | None = None
     if profile == "full_shadow":
+        if not os.getenv("ARTIFACT_DIR", "").strip():
+            raise E2EExecutionError(
+                "artifact_storage",
+                "full_shadow requires ARTIFACT_DIR on a mounted persistent Railway Volume; refusing ephemeral artifacts",
+            )
         if rendered is None:  # pragma: no cover - full shadow always renders, including an empty report
             raise E2EExecutionError("full_shadow_artifact", "full-shadow email report was not rendered")
         artifact_started = monotonic()
         try:
             artifact_json_path, artifact_html_path = write_full_shadow_artifacts(
-                artifact_dir=store.state_dir / "artifacts",
+                artifact_dir=_artifact_dir(store),
                 run_time=run_time,
                 metrics={
                     "profile": profile,
@@ -477,6 +496,7 @@ def run_real_e2e(
                     "summary_seconds": summary_seconds,
                     "summary_calls": len(email_items),
                     "render_seconds": render_seconds,
+                    **cascade_metrics,
                 },
                 delivery_checkpoint_before=(
                     delivery_checkpoint_before.isoformat() if delivery_checkpoint_before is not None else None
@@ -531,6 +551,7 @@ def run_real_e2e(
         openai_model=openai_model,
         judge_seconds=judge_seconds,
         judge_calls=len(judged),
+        cascade_metrics=cascade_metrics,
         summary_seconds=summary_seconds,
         summary_calls=len(email_items),
         render_seconds=render_seconds,
@@ -545,3 +566,9 @@ def run_real_e2e(
     )
     _log("e2e_complete", **result.log_payload())
     return result
+
+
+def _artifact_dir(store: JsonStateStore) -> Path:
+    """Use a mounted persistent directory in Railway; local defaults remain convenient."""
+    configured = os.getenv("ARTIFACT_DIR", "").strip()
+    return Path(configured) if configured else store.state_dir / "artifacts"

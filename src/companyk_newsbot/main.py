@@ -3,11 +3,13 @@
 import json
 import os
 from datetime import date
+from pathlib import Path
 
 from .config import load_keyword_map
 from .email import HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from .e2e import E2EExecutionError, run_real_e2e
 from .state import JsonStateStore
+from .replay import run_replay, write_replay_report
 
 
 def main() -> int:
@@ -15,11 +17,20 @@ def main() -> int:
     mode = os.getenv("RUN_MODE", "shadow").lower()
     if os.getenv("E2E_TEST_TRIGGER", "").strip().lower() == "true":
         mode = "e2e_test"
-    if mode not in {"local", "test", "shadow", "e2e_test", "full_shadow", "live"}:
-        raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, full_shadow, or live")
+    if mode not in {"local", "test", "shadow", "e2e_test", "full_shadow", "cascade_eval", "live"}:
+        raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, full_shadow, cascade_eval, or live")
     if mode == "live":
         raise RuntimeError("live mode is blocked until delivery is implemented and explicitly enabled")
     store = JsonStateStore(os.getenv("STATE_DIR", ".state"))
+    if mode == "cascade_eval":
+        source = os.getenv("CASCADE_REPLAY_ARTIFACT", "").strip()
+        target = os.getenv("CASCADE_REPLAY_OUTPUT", "artifacts/luna_replay.json").strip()
+        if not source:
+            raise RuntimeError("CASCADE_REPLAY_ARTIFACT must point to a preserved Sol-only full-shadow JSON")
+        report = __import__("asyncio").run(run_replay(Path(source)))
+        write_replay_report(report, Path(target))
+        print(json.dumps({"event": "cascade_replay_complete", "output_path": target, **report}, ensure_ascii=False, sort_keys=True))
+        return 0
     if mode in {"e2e_test", "full_shadow"}:
         profile = "smoke" if mode == "e2e_test" else "full_shadow"
         try:

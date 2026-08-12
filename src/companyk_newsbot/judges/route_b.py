@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from typing import Any, Literal, Protocol
@@ -70,6 +70,8 @@ class JudgedRouteBCandidate:
     decision: JudgeOutput
     prompt_version: str
     model: str
+    # Kept optional so the original Sol-only judge contract stays backwards compatible.
+    audit: dict[str, Any] = field(default_factory=dict)
 
 
 class RouteBCausalMaterialityJudge:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import asdict
 from datetime import datetime
 import hashlib
 import json
@@ -61,6 +60,7 @@ def _judged(value: JudgedRouteBCandidate) -> dict[str, Any]:
             "impact_direction": decision.impact_direction,
             "causal_mechanism": decision.causal_mechanism,
             "rejection_reason": decision.rejection_reason,
+            "audit": value.audit,
         },
     }
 
