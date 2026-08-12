@@ -24,6 +24,8 @@ from companyk_newsbot.state import JsonStateStore
 TEST_RECIPIENT = "jeremy.cheon@pm.me"
 KST = ZoneInfo("Asia/Seoul")
 MAX_JUDGE_CALLS = 25
+MAX_DIRECT_QUERIES = 20
+MAX_EXPOSURE_QUERIES = 20
 
 
 class E2EExecutionError(RuntimeError):
@@ -74,9 +76,15 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
         raise E2EExecutionError("safety_check", f"e2e_test may send only to {TEST_RECIPIENT}")
 
     registry = ExposureRegistry(config)
-    direct_queries = tuple(config.company_rules)
-    exposure_queries = tuple(query.query for query in registry.queries)
-    _log("queries_prepared", direct=len(direct_queries), external=len(exposure_queries))
+    direct_queries = tuple(config.company_rules)[:MAX_DIRECT_QUERIES]
+    exposure_queries = tuple(query.query for query in registry.queries)[:MAX_EXPOSURE_QUERIES]
+    _log(
+        "queries_prepared",
+        direct=len(direct_queries),
+        external=len(exposure_queries),
+        direct_cap=MAX_DIRECT_QUERIES,
+        external_cap=MAX_EXPOSURE_QUERIES,
+    )
 
     collected = []
     collection_failures: list[dict[str, str]] = []
