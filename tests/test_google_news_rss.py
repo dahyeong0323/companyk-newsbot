@@ -67,7 +67,7 @@ def test_collect_many_uses_bounded_concurrency() -> None:
         active -= 1
         return httpx.Response(200, content=RSS_BODY, request=request)
 
-    async def run() -> list:
+    async def run():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         collector = GoogleNewsRSSCollector(client=client, settings=RSSCollectorSettings(concurrency=2))
         try:
@@ -75,6 +75,34 @@ def test_collect_many_uses_bounded_concurrency() -> None:
         finally:
             await client.aclose()
 
-    articles = asyncio.run(run())
-    assert len(articles) == 6
+    result = asyncio.run(run())
+    assert len(result.articles) == 6
+    assert len(result.successes) == 6
+    assert not result.failures
     assert maximum == 2
+
+
+def test_collect_many_isolates_timeout_http_and_parse_failures() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params["q"]
+        if query == "timeout":
+            raise httpx.ReadTimeout("too slow", request=request)
+        if query == "http":
+            return httpx.Response(503, request=request)
+        if query == "parse":
+            return httpx.Response(200, content=b"not an rss feed", request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            return await collector.collect_many(["success", "timeout", "http", "parse"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert [item.status for item in result.queries] == ["success", "timeout", "http_error", "parse_error"]
+    assert len(result.articles) == 1
+    assert len(result.successes) == 1
+    assert len(result.failures) == 3

@@ -91,11 +91,27 @@ def run_real_e2e(config: KeywordMapConfig, store: JsonStateStore, *, today: date
     try:
         async def collect_all() -> list:
             async with GoogleNewsRSSCollector() as collector:
-                direct_articles = await collector.collect_many(direct_queries)
-                external_articles = await collector.collect_many(exposure_queries)
-                _log("collection_route", route="direct", queries=len(direct_queries), articles=len(direct_articles))
-                _log("collection_route", route="external", queries=len(exposure_queries), articles=len(external_articles))
-                return [*direct_articles, *external_articles]
+                direct_result = await collector.collect_many(direct_queries)
+                external_result = await collector.collect_many(exposure_queries)
+                for route, result in (("direct", direct_result), ("external", external_result)):
+                    _log(
+                        "collection_route",
+                        route=route,
+                        queries=len(result.queries),
+                        successes=len(result.successes),
+                        failures=len(result.failures),
+                        articles=len(result.articles),
+                    )
+                    for failure in result.failures:
+                        failure_record = {
+                            "route": route,
+                            "query": failure.query,
+                            "status": failure.status,
+                            "reason": failure.error or failure.status,
+                        }
+                        collection_failures.append(failure_record)
+                        _log("collection_query_failed", **failure_record)
+                return [*direct_result.articles, *external_result.articles]
 
         collected = asyncio.run(collect_all())
     except Exception as exc:

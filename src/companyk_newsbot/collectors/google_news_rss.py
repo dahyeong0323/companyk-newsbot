@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
 import re
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import feedparser
@@ -24,6 +24,50 @@ TRACKING_PARAMETERS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid"})
 
 class CollectionError(RuntimeError):
     """Raised when an RSS feed cannot be retrieved or parsed safely."""
+
+
+class QueryTimeoutError(CollectionError):
+    """Raised when one RSS query exceeds an HTTPX network timeout."""
+
+
+class QueryHTTPError(CollectionError):
+    """Raised when one RSS query fails at the HTTP layer."""
+
+
+class QueryParseError(CollectionError):
+    """Raised when one RSS response is not a usable feed."""
+
+
+QueryStatus = Literal["success", "timeout", "http_error", "parse_error"]
+
+
+@dataclass(frozen=True)
+class QueryCollectionResult:
+    """Outcome of exactly one RSS query."""
+
+    query: str
+    status: QueryStatus
+    articles: tuple[Article, ...] = ()
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class RSSCollectionResult:
+    """All per-query outcomes from one bounded collection call."""
+
+    queries: tuple[QueryCollectionResult, ...]
+
+    @property
+    def articles(self) -> tuple[Article, ...]:
+        return tuple(article for result in self.queries for article in result.articles)
+
+    @property
+    def successes(self) -> tuple[QueryCollectionResult, ...]:
+        return tuple(result for result in self.queries if result.status == "success")
+
+    @property
+    def failures(self) -> tuple[QueryCollectionResult, ...]:
+        return tuple(result for result in self.queries if result.status != "success")
 
 
 @dataclass(frozen=True)
@@ -130,12 +174,14 @@ class GoogleNewsRSSCollector:
         try:
             response = await self._client.get(GOOGLE_NEWS_RSS_URL, params=params)
             response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise QueryTimeoutError(f"Google News RSS request timed out for {query!r}: {exc}") from exc
         except httpx.HTTPError as exc:
-            raise CollectionError(f"Google News RSS request failed for {query!r}: {exc}") from exc
+            raise QueryHTTPError(f"Google News RSS request failed for {query!r}: {exc}") from exc
 
         parsed = feedparser.parse(response.content)
         if parsed.bozo and not parsed.entries:
-            raise CollectionError(f"Google News RSS response could not be parsed for {query!r}")
+            raise QueryParseError(f"Google News RSS response could not be parsed for {query!r}")
 
         retrieved_at = self._now()
         if retrieved_at.tzinfo is None:
@@ -157,16 +203,16 @@ class GoogleNewsRSSCollector:
                 articles.append(article)
         return articles
 
-    async def collect_many(self, queries: Iterable[str]) -> list[Article]:
+    async def collect_many(self, queries: Iterable[str]) -> RSSCollectionResult:
         """Collect explicit queries concurrently without exceeding the configured bound."""
         query_list = list(queries)
         if not query_list:
-            return []
+            return RSSCollectionResult(queries=())
 
         queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue()
         for index, query in enumerate(query_list):
             queue.put_nowait((index, query))
-        batches: list[list[Article] | None] = [None] * len(query_list)
+        outcomes: list[QueryCollectionResult | None] = [None] * len(query_list)
 
         async def worker() -> None:
             while True:
@@ -175,13 +221,24 @@ class GoogleNewsRSSCollector:
                 except asyncio.QueueEmpty:
                     return
                 try:
-                    batches[index] = await self.collect(query)
+                    articles = await self.collect(query)
+                    outcomes[index] = QueryCollectionResult(
+                        query=query,
+                        status="success",
+                        articles=tuple(articles),
+                    )
+                except QueryTimeoutError as exc:
+                    outcomes[index] = QueryCollectionResult(query=query, status="timeout", error=str(exc))
+                except QueryHTTPError as exc:
+                    outcomes[index] = QueryCollectionResult(query=query, status="http_error", error=str(exc))
+                except QueryParseError as exc:
+                    outcomes[index] = QueryCollectionResult(query=query, status="parse_error", error=str(exc))
                 finally:
                     queue.task_done()
 
         worker_count = min(self.settings.concurrency, len(query_list))
         await asyncio.gather(*(worker() for _ in range(worker_count)))
-        return [article for batch in batches if batch is not None for article in batch]
+        return RSSCollectionResult(queries=tuple(outcome for outcome in outcomes if outcome is not None))
 
     @staticmethod
     def _normalize_entry(
