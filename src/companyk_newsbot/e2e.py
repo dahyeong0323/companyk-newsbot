@@ -18,6 +18,7 @@ from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
+from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
 from companyk_newsbot.judges import NewsSummarizer, RouteBCausalMaterialityJudge
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
@@ -57,10 +58,13 @@ class E2EResult:
     status: Literal["success", "inconclusive"]
     profile: ExecutionProfile
     query_count: int
+    direct_query_count: int
+    exposure_query_count: int
     collection_successes: int
     collection_failures: int
     collection_seconds: float
     collected: int
+    freshness_seconds: float
     freshness_window_start: str
     freshness_window_end: str
     freshness_mode: str
@@ -86,9 +90,13 @@ class E2EResult:
     judge_calls: int
     summary_seconds: float
     summary_calls: int
+    render_seconds: float
     email_seconds: float
     total_seconds: float
     delivery_id: str | None
+    artifact_json_path: str | None
+    artifact_html_path: str | None
+    production_delivery_checkpoint_before: str | None
 
     def log_payload(self) -> dict[str, object]:
         return self.__dict__.copy()
@@ -212,6 +220,7 @@ def run_real_e2e(
 
     registry = ExposureRegistry(config)
     query_plan = build_query_plan(config, profile=profile)
+    delivery_checkpoint_before = store.last_delivery_datetime()
     if profile == "smoke":
         smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
         freshness_window = smoke_window(now=run_time, lookback_days=smoke_days)
@@ -252,7 +261,9 @@ def run_real_e2e(
             reason=failure.error or failure.status,
         )
     collected = list(collection_result.articles)
+    freshness_started = monotonic()
     freshness = filter_articles(collected, window=freshness_window)
+    freshness_seconds = _seconds(freshness_started)
     fresh_articles = list(freshness.accepted)
     _log(
         "collection_complete",
@@ -264,6 +275,7 @@ def run_real_e2e(
         freshness_window_start=freshness.window.start.isoformat(),
         freshness_window_end=freshness.window.end.isoformat(),
         freshness_mode=freshness.window.mode,
+        freshness_seconds=freshness_seconds,
         freshness_accepted=len(fresh_articles),
         freshness_rejected_too_old=freshness.rejected_too_old,
         freshness_rejected_future=freshness.rejected_future,
@@ -353,7 +365,10 @@ def run_real_e2e(
             continue
         seen_run_fingerprints.add(identity)
         kind, fingerprint = identity
-        if store.was_sent(fingerprint, kind=kind):
+        if profile == "full_shadow":
+            # A review run observes the full ranked outcome; it never sends or mutates delivery idempotency.
+            unsent.append(item)
+        elif store.was_sent(fingerprint, kind=kind):
             already_sent += 1
         else:
             unsent.append(item)
@@ -368,8 +383,10 @@ def run_real_e2e(
     status: Literal["success", "inconclusive"] = "success"
     email_items: list[EmailNewsItem] = []
     summary_seconds = 0.0
+    render_seconds = 0.0
     email_seconds = 0.0
     delivery_id: str | None = None
+    rendered = None
     if profile == "smoke" and not unsent:
         status = "inconclusive"
         _log(
@@ -395,34 +412,102 @@ def run_real_e2e(
         summary_seconds = _seconds(summary_started)
         _log("summary_complete", summary_seconds=summary_seconds, summary_calls=len(email_items))
 
-        email_started = monotonic()
+        render_started = monotonic()
         try:
             rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
+            render_seconds = _seconds(render_started)
             if settings is not None:
+                email_started = monotonic()
                 sender = ResendEmailSender(settings)
                 try:
                     delivery_id = sender.send(rendered)
                 finally:
                     sender.close()
+                email_seconds = _seconds(email_started)
         except Exception as exc:
             stage = "resend_delivery" if settings is not None else "email_render"
             raise E2EExecutionError(stage, str(exc)) from exc
-        email_seconds = _seconds(email_started)
-        _log("email_complete", email_seconds=email_seconds, delivered=delivery_id is not None)
+        _log(
+            "email_complete",
+            render_seconds=render_seconds,
+            email_seconds=email_seconds,
+            delivered=delivery_id is not None,
+        )
 
     if delivery_id is not None:
         for item in unsent:
             kind, fingerprint = _fingerprint(item)
             store.mark_sent(fingerprint, kind=kind)
 
+    artifact_json_path: str | None = None
+    artifact_html_path: str | None = None
+    if profile == "full_shadow":
+        if rendered is None:  # pragma: no cover - full shadow always renders, including an empty report
+            raise E2EExecutionError("full_shadow_artifact", "full-shadow email report was not rendered")
+        artifact_started = monotonic()
+        try:
+            artifact_json_path, artifact_html_path = write_full_shadow_artifacts(
+                artifact_dir=store.state_dir / "artifacts",
+                run_time=run_time,
+                metrics={
+                    "profile": profile,
+                    "query_count": len(query_plan.queries),
+                    "direct_query_count": len(query_plan.direct_queries),
+                    "exposure_query_count": len(query_plan.exposure_queries),
+                    "collection_successes": len(collection_result.successes),
+                    "collection_failures": len(collection_result.failures),
+                    "collection_seconds": collection_seconds,
+                    "collected": len(collected),
+                    "freshness_seconds": freshness_seconds,
+                    "freshness_window_start": freshness.window.start.isoformat(),
+                    "freshness_window_end": freshness.window.end.isoformat(),
+                    "freshness_mode": freshness.window.mode,
+                    "freshness_accepted": len(fresh_articles),
+                    "article_deduped": len(article_dedup.articles),
+                    "article_duplicates": article_duplicates,
+                    "dedup_seconds": dedup_seconds,
+                    "routing_seconds": routing_seconds,
+                    "route_a_matches": len(route_a_matches),
+                    "route_a_events": len(route_a_events),
+                    "route_b_candidates": len(candidate_result.candidates),
+                    "route_b_accepted": len(accepted),
+                    "route_b_rejected": len(candidate_result.rejections) + len(judged) - len(accepted),
+                    "judge_seconds": judge_seconds,
+                    "judge_calls": len(judged),
+                    "summary_seconds": summary_seconds,
+                    "summary_calls": len(email_items),
+                    "render_seconds": render_seconds,
+                },
+                delivery_checkpoint_before=(
+                    delivery_checkpoint_before.isoformat() if delivery_checkpoint_before is not None else None
+                ),
+                rendered=rendered,
+                email_items=email_items,
+                route_a_events=route_a_events,
+                judged=judged,
+                prefilter_rejections=candidate_result.rejections,
+            )
+        except Exception as exc:
+            raise E2EExecutionError("full_shadow_artifact", str(exc)) from exc
+        _log(
+            "full_shadow_artifacts_complete",
+            artifact_seconds=_seconds(artifact_started),
+            artifact_json_path=artifact_json_path,
+            artifact_html_path=artifact_html_path,
+            email_sent=False,
+        )
+
     result = E2EResult(
         status=status,
         profile=profile,
         query_count=len(query_plan.queries),
+        direct_query_count=len(query_plan.direct_queries),
+        exposure_query_count=len(query_plan.exposure_queries),
         collection_successes=len(collection_result.successes),
         collection_failures=len(collection_result.failures),
         collection_seconds=collection_seconds,
         collected=len(collected),
+        freshness_seconds=freshness_seconds,
         freshness_window_start=freshness.window.start.isoformat(),
         freshness_window_end=freshness.window.end.isoformat(),
         freshness_mode=freshness.window.mode,
@@ -448,9 +533,15 @@ def run_real_e2e(
         judge_calls=len(judged),
         summary_seconds=summary_seconds,
         summary_calls=len(email_items),
+        render_seconds=render_seconds,
         email_seconds=email_seconds,
         total_seconds=_seconds(total_started),
         delivery_id=delivery_id,
+        artifact_json_path=artifact_json_path,
+        artifact_html_path=artifact_html_path,
+        production_delivery_checkpoint_before=(
+            delivery_checkpoint_before.isoformat() if delivery_checkpoint_before is not None else None
+        ),
     )
     _log("e2e_complete", **result.log_payload())
     return result

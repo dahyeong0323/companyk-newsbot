@@ -1,5 +1,6 @@
 """Railway-compatible short-lived batch entry point."""
 
+import json
 import os
 from datetime import date
 
@@ -28,12 +29,29 @@ def main() -> int:
             raise
         phase = "real_e2e_smoke" if profile == "smoke" else "full_shadow_non_delivery"
         checkpoint = "shadow" if profile == "full_shadow" and result.status == "success" else None
-        store.record_run(
+        state = store.record_run(
             mode=mode,
             status=result.status,
             details={"phase": phase, **result.log_payload()},
             checkpoint=checkpoint,
         )
+        if profile == "full_shadow":
+            before = getattr(result, "production_delivery_checkpoint_before", None)
+            after = state.last_successful_delivery_run
+            print(
+                json.dumps(
+                    {
+                        "event": "full_shadow_checkpoint_complete",
+                        "email_sent": False,
+                        "production_delivery_checkpoint_before": before,
+                        "production_delivery_checkpoint_after": after,
+                        "production_delivery_checkpoint_unchanged": before == after,
+                        "shadow_checkpoint": state.last_shadow_run,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
         return 0 if result.status == "success" else 2
     if mode == "test":
         rendered = HtmlEmailRenderer().render([], report_date=date.today())
