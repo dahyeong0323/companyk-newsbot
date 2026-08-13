@@ -532,6 +532,7 @@ def run_real_e2e(
         "summary_calls": 0, "summary_retries": 0, "summary_evidence_retries": 0, "summary_failures": 0,
         "insight_implication_count": 0, "insight_watchpoint_count": 0, "grounding_verifier_calls": 0,
         "grounding_verifier_failures": 0, "unsupported_implications": 0, "watchpoint_rewrites": 0,
+        "watchpoint_fallbacks": 0, "core_rewrites": 0, "core_fallbacks": 0,
     }
     if profile == "smoke" and not unsent:
         status = "inconclusive"

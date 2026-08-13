@@ -187,6 +187,7 @@ def test_unsupported_implication_is_rewritten_once_as_grounded_watchpoint() -> N
     watchpoint = summary(item)
     editor = SequenceResponses(implication, watchpoint)
     verifier_responses = SequenceResponses(
+        GroundingVerifierOutput(decision="SUPPORTED", short_reason="core factual fields are grounded"),
         GroundingVerifierOutput(decision="UNSUPPORTED", unsupported_claims=["valuation"], short_reason="not supported"),
         GroundingVerifierOutput(decision="SUPPORTED", short_reason="concrete watchpoint is grounded"),
     )
@@ -197,7 +198,7 @@ def test_unsupported_implication_is_rewritten_once_as_grounded_watchpoint() -> N
     result = summarizer.summarize(item)
     assert result.insight_mode == "watchpoint"
     assert "기업가치" not in result.insight_one_liner
-    assert len(editor.calls) == 2 and len(verifier_responses.calls) == 2
+    assert len(editor.calls) == 2 and len(verifier_responses.calls) == 3
     assert editor.calls[1]["model"] == "gpt-5.6-sol"
     assert verifier_responses.calls[0]["model"] == "gpt-5.6-luna"
     rendered = HtmlEmailRenderer().render([EmailNewsItem(item, result)], report_date=date(2026, 8, 12))
@@ -205,14 +206,107 @@ def test_unsupported_implication_is_rewritten_once_as_grounded_watchpoint() -> N
     assert result.insight_one_liner in rendered.html
 
 
-def test_invalid_watchpoint_rewrite_fails_closed() -> None:
+def test_invalid_watchpoint_rewrite_uses_safe_fallback() -> None:
     item = direct_item()
     implication = summary(item, mode="implication", text="기업가치 상승이 기대된다.")
     invalid = summary(item, text="귀추가 주목된다.")
     editor = SequenceResponses(implication, invalid)
     verifier = SimpleNamespace(verify=lambda payload, proposed: GroundingVerifierOutput(decision="UNSUPPORTED", short_reason="unsupported"))
-    with pytest.raises(SummaryError, match="watchpoint rewrite failed"):
-        NewsSummarizer(SimpleNamespace(responses=editor), model="sol", grounding_verifier=verifier).summarize(item)
+    result = NewsSummarizer(SimpleNamespace(responses=editor), model="sol", grounding_verifier=verifier).summarize(item)
+    assert result.insight_mode == "watchpoint"
+    assert result.insight_one_liner == "해당 사건의 실제 이행과 관련 공식 발표가 후속 보도에서 확인되는지 주시."
+
+
+class SplitVerifier:
+    def __init__(self, *, core: tuple[str, ...] = ("SUPPORTED",), insights: tuple[str, ...] = ("SUPPORTED",)) -> None:
+        self.core = list(core)
+        self.insights = list(insights)
+
+    def verify_core(self, event_payload, proposed):
+        return GroundingVerifierOutput(decision=self.core.pop(0), short_reason="core fixture")
+
+    def verify(self, event_payload, proposed):
+        return GroundingVerifierOutput(decision=self.insights.pop(0), short_reason="insight fixture")
+
+
+def test_unsupported_core_facts_are_rewritten_once_before_insight_grounding() -> None:
+    item = direct_item()
+    original = summary(item, text="Monitor the next official update.")
+    rewritten = summary(item, text="Monitor the next official update.")
+    verifier = SplitVerifier(core=("UNSUPPORTED", "SUPPORTED"))
+    summarizer = NewsSummarizer(SimpleNamespace(responses=SequenceResponses(original, rewritten)), model="sol", grounding_verifier=verifier)
+    assert summarizer.summarize(item).fact_summary == rewritten.fact_summary
+    assert verifier.insights == []
+    assert summarizer.metrics.core_rewrites == 1
+    assert summarizer.metrics.core_fallbacks == 0
+    assert any(trace["event"] == "core_recovery_rewrite" and trace["core_fallback_used"] is False for trace in summarizer.forensic_trace)
+
+
+def test_second_unsupported_core_rewrite_uses_deterministic_factual_fallback() -> None:
+    item = direct_item()
+    original = summary(item, text="Monitor the next official update.")
+    still_unsupported = summary(item, text="Monitor the next official update.")
+    summarizer = NewsSummarizer(
+        SimpleNamespace(responses=SequenceResponses(original, still_unsupported)), model="sol",
+        grounding_verifier=SplitVerifier(core=("UNSUPPORTED", "UNSUPPORTED", "SUPPORTED")),
+    )
+    result = summarizer.summarize(item)
+    assert result.fact_summary == item.direct_match.article.title
+    assert result.why_it_matters is None
+    assert summarizer.metrics.core_rewrites == summarizer.metrics.core_fallbacks == 1
+    fallback = next(trace for trace in summarizer.forensic_trace if trace["event"] == "core_fallback_used")
+    assert fallback["core_original"]["fact_summary"] == original.fact_summary
+    assert fallback["core_rewrite"]["fact_summary"] == still_unsupported.fact_summary
+    assert fallback["core_fallback_used"] is True
+
+
+def test_core_fallback_uses_event_related_digest_clause() -> None:
+    payload = json.dumps({
+        "route": "external", "company": "Portfolio Co",
+        "representative_article": {"title": "Other company raises funds; Novo launches a Wegovy subscription; unrelated fraud case"},
+        "approved_impact_links": [{"causal_mechanism": "Novo Wegovy subscription could affect the relevant market."}],
+    })
+    proposed = SummaryOutput(
+        fact_summary="Unsafe paraphrase.", why_it_matters="Approved context.", insight_one_liner="Monitor the next update.",
+        insight_dimension="competition", insight_mode="watchpoint", confidence="medium", evidence_article_ids=["known"],
+    )
+    fallback = NewsSummarizer._safe_core_fallback(payload, proposed)
+    assert fallback.fact_summary == "Novo launches a Wegovy subscription"
+
+
+def test_unsupported_watchpoint_is_rewritten_once_and_keeps_event() -> None:
+    item = direct_item()
+    original = summary(item, text="근거 밖의 구체 조건을 확인해야 한다.")
+    rewritten = summary(item, text="후속 공식 발표에서 실제 이행이 확인되는지 주시.")
+    summarizer = NewsSummarizer(
+        SimpleNamespace(responses=SequenceResponses(original, rewritten)), model="sol",
+        grounding_verifier=SplitVerifier(insights=("UNSUPPORTED", "SUPPORTED")),
+    )
+    result = summarizer.summarize(item)
+    assert result.insight_one_liner == rewritten.insight_one_liner
+    assert summarizer.metrics.watchpoint_rewrites == 1
+    assert summarizer.metrics.watchpoint_fallbacks == 0
+    assert any(trace["event"] == "watchpoint_recovery_begin" and trace["watchpoint_original"] == original.insight_one_liner for trace in summarizer.forensic_trace)
+    assert any(trace["event"] == "watchpoint_recovery_rewrite" and trace["watchpoint_fallback_used"] is False for trace in summarizer.forensic_trace)
+
+
+def test_unsupported_watchpoint_rewrite_uses_deterministic_fallback_and_keeps_event() -> None:
+    item = direct_item()
+    original = summary(item, text="근거 밖의 구체 조건을 확인해야 한다.")
+    still_unsupported = summary(item, text="여전히 근거 밖의 조건을 확인해야 한다.")
+    summarizer = NewsSummarizer(
+        SimpleNamespace(responses=SequenceResponses(original, still_unsupported)), model="sol",
+        grounding_verifier=SplitVerifier(insights=("UNSUPPORTED", "UNSUPPORTED")),
+    )
+    result = summarizer.summarize(item)
+    assert result.insight_mode == "watchpoint"
+    assert result.insight_one_liner == "해당 사건의 실제 이행과 관련 공식 발표가 후속 보도에서 확인되는지 주시."
+    assert summarizer.metrics.watchpoint_fallbacks == 1
+    fallback = next(trace for trace in summarizer.forensic_trace if trace["event"] == "watchpoint_fallback_used")
+    assert fallback["watchpoint_original"] == original.insight_one_liner
+    assert fallback["watchpoint_rewrite"] == still_unsupported.insight_one_liner
+    assert fallback["watchpoint_grounding_verdict"] == "UNSUPPORTED"
+    assert fallback["watchpoint_fallback_used"] is True
 
 
 def test_editor_payload_contains_canonical_event_and_family_context() -> None:

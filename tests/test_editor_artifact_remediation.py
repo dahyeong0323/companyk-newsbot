@@ -178,7 +178,7 @@ def test_watchpoint_fallback_is_concrete_and_prompted() -> None:
     responses = SequentialResponses(result)
     assert NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier()).summarize(item).insight_one_liner == "Monitor the next disclosed milestone."
     system_prompt = responses.calls[0]["input"][0]["content"]
-    assert "watchpoint" in system_prompt and "Never invent" in system_prompt
+    assert "watchpoint" in system_prompt and "Never invent" in system_prompt and "has not disclosed" in system_prompt
 
 
 def test_editorial_forensic_trace_records_exact_input_validation_and_final_status() -> None:
