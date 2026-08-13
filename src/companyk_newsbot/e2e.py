@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import asyncio
@@ -16,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
 from companyk_newsbot.config import KeywordMapConfig
-from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer, RouteBEventClusterer
+from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
@@ -301,8 +302,10 @@ def run_real_e2e(
     routing_started = monotonic()
     try:
         detector = RouteADetector(config)
+        event_resolver = LunaEventPairResolver.from_environment() if profile == "full_shadow" else None
         route_a_matches = [match for article in article_dedup.articles for match in detector.detect(article)]
-        route_a_events = RouteAEventClusterer().cluster(route_a_matches)
+        route_a_clusterer = RouteAEventClusterer(resolver=event_resolver)
+        route_a_events = route_a_clusterer.cluster(route_a_matches)
         candidate_result = RouteBCandidateGenerator(registry).generate(article_dedup.articles)
     except Exception as exc:
         raise E2EExecutionError("deterministic_routing", str(exc)) from exc
@@ -362,10 +365,22 @@ def run_real_e2e(
         **cascade_metrics,
     )
 
-    route_b_events = RouteBEventClusterer().cluster(accepted)
+    route_b_clusterer = RouteBEventClusterer(resolver=event_resolver)
+    route_b_events = route_b_clusterer.cluster(accepted)
+    event_articles_before = len(route_a_matches) + len({result.candidate.article.canonical_url for result in accepted})
+    event_count_after = len(route_a_events) + len(route_b_events)
+    collapsed_events = max(0, event_articles_before - event_count_after)
+    representative_selector = RepresentativeArticleSelector()
+    representative_distribution = Counter(
+        representative_selector.source_class(article)
+        for article in (
+            *(event.primary.article for event in route_a_events),
+            *(event.representative.candidate.article for event in route_b_events),
+        )
+    )
     ranked = NewsRanker().rank(
         [
-            *(RankedNewsItem.from_direct(event.primary) for event in route_a_events),
+            *(RankedNewsItem.from_direct_event(event) for event in route_a_events),
             *(RankedNewsItem.from_external_event(event) for event in route_b_events),
         ]
     )
@@ -402,6 +417,7 @@ def run_real_e2e(
     email_seconds = 0.0
     delivery_id: str | None = None
     rendered = None
+    summary_metrics: dict[str, int] = {"summary_calls": 0, "summary_evidence_retries": 0, "summary_failures": 0, "insight_implication_count": 0, "insight_watchpoint_count": 0}
     if profile == "smoke" and not unsent:
         status = "inconclusive"
         _log(
@@ -416,16 +432,32 @@ def run_real_e2e(
         try:
             from openai import OpenAI
 
-            summarizer = NewsSummarizer(
-                OpenAI(timeout=_openai_timeout_seconds()),
-                model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol"),
-                reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "medium"),
-            )
-            email_items = [EmailNewsItem(item, summarizer.summarize(item)) for item in unsent]
+            summary_client = OpenAI(timeout=_openai_timeout_seconds())
+            summary_model = os.getenv("SUMMARY_MODEL", "gpt-5.6-sol")
+            summary_reasoning = os.getenv("SUMMARY_REASONING", "medium")
+            def summarize_one(item: RankedNewsItem):
+                worker = NewsSummarizer(summary_client, model=summary_model, reasoning_effort=summary_reasoning)
+                output = worker.summarize(item)
+                metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {"summary_calls": 1, "summary_evidence_retries": 0, "summary_failures": 0, "insight_implication_count": int(output.insight_mode == "implication"), "insight_watchpoint_count": int(output.insight_mode == "watchpoint")}
+                return output, metrics
+            summary_concurrency = _positive_int_from_environment("SUMMARY_CONCURRENCY", 4)
+            with ThreadPoolExecutor(max_workers=summary_concurrency) as pool:
+                summarized = list(pool.map(summarize_one, unsent))
+            outputs = [output for output, _ in summarized]
+            summary_metrics = {key: sum(metrics[key] for _, metrics in summarized) for key in summary_metrics}
+            email_items = [
+                EmailNewsItem(
+                    item,
+                    output,
+                    summary_evidence_retry_count=metrics["summary_evidence_retries"],
+                    summary_failure=bool(metrics["summary_failures"]),
+                )
+                for item, (output, metrics) in zip(unsent, summarized)
+            ]
         except Exception as exc:
             raise E2EExecutionError("openai_summary", str(exc)) from exc
         summary_seconds = _seconds(summary_started)
-        _log("summary_complete", summary_seconds=summary_seconds, summary_calls=len(email_items))
+        _log("summary_complete", summary_seconds=summary_seconds, **summary_metrics)
 
         render_started = monotonic()
         try:
@@ -497,6 +529,24 @@ def run_real_e2e(
                     "summary_seconds": summary_seconds,
                     "summary_calls": len(email_items),
                     "render_seconds": render_seconds,
+                    "qualified_route_a_articles": len(route_a_matches),
+                    "qualified_route_b_articles": len({result.candidate.article.canonical_url for result in accepted}),
+                    "route_a_events_before_dedup": len(route_a_matches),
+                    "route_a_events_after_dedup": len(route_a_events),
+                    "route_b_events_before_dedup": len({result.candidate.article.canonical_url for result in accepted}),
+                    "route_b_events_after_dedup": len(route_b_events),
+                    "cross_publication_articles_collapsed": collapsed_events,
+                    "duplicate_event_reduction_rate": round(collapsed_events / max(1, event_articles_before), 5),
+                    "representative_source_distribution": dict(representative_distribution),
+                    "multi_company_external_events": sum(len(event.companies) > 1 for event in route_b_events),
+                    **{f"route_a_{key}": value for key, value in route_a_clusterer.metrics.payload().items()},
+                    **{f"route_b_{key}": value for key, value in route_b_clusterer.metrics.payload().items()},
+                    "deterministic_same_event": route_a_clusterer.metrics.deterministic_same_event + route_b_clusterer.metrics.deterministic_same_event,
+                    "deterministic_different_event": route_a_clusterer.metrics.deterministic_different_event + route_b_clusterer.metrics.deterministic_different_event,
+                    "ambiguous_pairs": route_a_clusterer.metrics.ambiguous_pairs + route_b_clusterer.metrics.ambiguous_pairs,
+                    "luna_event_dedup_calls": route_a_clusterer.metrics.luna_event_dedup_calls + route_b_clusterer.metrics.luna_event_dedup_calls,
+                    "luna_event_dedup_failures": route_a_clusterer.metrics.luna_event_dedup_failures + route_b_clusterer.metrics.luna_event_dedup_failures,
+                    **summary_metrics,
                     **cascade_metrics,
                 },
                 delivery_checkpoint_before=(
@@ -505,6 +555,7 @@ def run_real_e2e(
                 rendered=rendered,
                 email_items=email_items,
                 route_a_events=route_a_events,
+                route_b_events=route_b_events,
                 judged=judged,
                 prefilter_rejections=candidate_result.rejections,
             )
@@ -554,7 +605,7 @@ def run_real_e2e(
         judge_calls=len(judged),
         cascade_metrics=cascade_metrics,
         summary_seconds=summary_seconds,
-        summary_calls=len(email_items),
+        summary_calls=summary_metrics["summary_calls"],
         render_seconds=render_seconds,
         email_seconds=email_seconds,
         total_seconds=_seconds(total_started),

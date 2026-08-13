@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from companyk_newsbot.dedup import EventCluster, RouteBEventClusterer, article_id
+from companyk_newsbot.dedup import EventCluster, ExternalEventCluster, article_id
 from companyk_newsbot.email import EmailNewsItem, RenderedEmail
 from companyk_newsbot.judges import JudgedRouteBCandidate
 from companyk_newsbot.rules import RouteBRejection
@@ -34,13 +34,39 @@ def _route_a_event(cluster: EventCluster) -> dict[str, Any]:
     members = (cluster.primary, *cluster.coverage)
     return {
         "event_id": cluster.event_id or _event_id(cluster),
+        "route": "Route A",
         "company": cluster.company,
         "matched_aliases": list(cluster.primary.matched_terms),
         "primary_article": _article(cluster.primary.article),
-        "duplicate_membership": [_article(member.article) for member in members],
+        "member_articles": [
+            {**_article(member.article), "representative_score": cluster.representative_scores[article_id(member.article)].total, "score_breakdown": cluster.representative_scores[article_id(member.article)].payload()}
+            for member in members
+        ],
+        "representative_article_id": article_id(cluster.primary.article),
         "coverage_count": cluster.coverage_count,
-        "event_anchors": {"tokens": sorted(cluster.anchors.tokens) if cluster.anchors else [], "numbers": sorted(cluster.anchors.numbers) if cluster.anchors else []},
-        "representative_score": (cluster.representative_scores or {}).get(article_id(cluster.primary.article)).payload() if (cluster.representative_scores or {}).get(article_id(cluster.primary.article)) else None,
+        "event_anchors": cluster.anchors.payload(),
+        "pairwise_dedup_decisions": [decision.payload() for decision in cluster.dedup_decisions],
+    }
+
+
+def _route_b_event(event: ExternalEventCluster) -> dict[str, Any]:
+    articles = event.all_articles
+    return {
+        "event_id": event.event_id,
+        "route": "Route B",
+        "event_family": event.event_family,
+        "source_families": list(event.source_families),
+        "impacted_companies": list(event.companies),
+        "representative_article_id": article_id(event.representative.candidate.article),
+        "member_articles": [
+            {**_article(article), "representative_score": event.representative_scores[article_id(article)].total, "score_breakdown": event.representative_scores[article_id(article)].payload()}
+            for article in articles
+        ],
+        "coverage_count": event.coverage_count,
+        "event_anchors": event.anchors.payload(),
+        "pairwise_dedup_decisions": [decision.payload() for decision in event.dedup_decisions],
+        "impact_links": [_judged(value) for value in event.impact_links],
+        "aggregate_materiality": event.materiality,
     }
 
 
@@ -110,6 +136,11 @@ def _final_item(position: int, email_item: EmailNewsItem) -> dict[str, Any]:
         "insight_mode": email_item.summary.insight_mode,
         "insight_confidence": email_item.summary.confidence,
         "evidence_article_ids": email_item.summary.evidence_article_ids,
+        "summary_evidence_retry_count": email_item.summary_evidence_retry_count,
+        "summary_failure": email_item.summary_failure,
+        "event_id": item.event_id,
+        "coverage_count": item.coverage_count,
+        "impacted_companies": list(item.impacted_companies),
     }
     if item.direct_match:
         payload["route_a"] = {"matched_aliases": list(item.direct_match.matched_terms)}
@@ -127,6 +158,7 @@ def write_full_shadow_artifacts(
     rendered: RenderedEmail,
     email_items: list[EmailNewsItem],
     route_a_events: list[EventCluster],
+    route_b_events: list[ExternalEventCluster],
     judged: list[JudgedRouteBCandidate],
     prefilter_rejections: Iterable[RouteBRejection],
 ) -> tuple[str, str]:
@@ -152,10 +184,7 @@ def write_full_shadow_artifacts(
             },
             "route_a_events": [_route_a_event(event) for event in route_a_events],
             "route_b": {
-                "events": [
-                    {"event_id": event.event_id, "event_family": event.event_family, "representative_article": _article(event.representative.candidate.article), "coverage_count": event.coverage_count, "coverage_articles": [_article(value.candidate.article) for value in event.coverage], "impacted_companies": list(event.companies), "impact_links": [_judged(value) for value in event.impact_links], "event_anchors": {"tokens": sorted(event.anchors.tokens), "numbers": sorted(event.anchors.numbers)}}
-                    for event in RouteBEventClusterer().cluster(value for value in judged if value.decision.qualifies)
-                ],
+                "events": [_route_b_event(event) for event in route_b_events],
                 "judgments": [_judged(value) for value in judged],
                 "rejected_sample": _rejection_sample(judged),
                 "prefilter_rejections": [

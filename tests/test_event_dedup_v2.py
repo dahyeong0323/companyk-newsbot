@@ -37,8 +37,8 @@ def test_route_b_conflicting_amounts_do_not_merge() -> None:
 
 def test_route_b_incompatible_family_or_window_do_not_merge() -> None:
     value = judged("A", "Platform decision update", "https://a.example/one")
-    other_family = judged("A", "Platform decision update", "https://a.example/two", family="policy_regulatory")
-    far = judged("A", "Platform decision update", "https://a.example/three", hour=8)
+    other_family = judged("A", "Platform policy decision", "https://a.example/two", family="policy_regulatory")
+    far = judged("A", "Platform decision outlook", "https://a.example/three", hour=8)
     far_article = far.candidate.article.model_copy(update={"published_at": far.candidate.article.published_at + timedelta(hours=73)})
     far = replace(far, candidate=replace(far.candidate, article=far_article))
     assert len(RouteBEventClusterer().cluster([value, other_family, far])) == 3

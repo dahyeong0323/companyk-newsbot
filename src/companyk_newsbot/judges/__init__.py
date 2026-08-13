@@ -2,7 +2,7 @@
 
 from .route_b import JudgeError, JudgeOutput, JudgedRouteBCandidate, RouteBCausalMaterialityJudge
 from .route_b_cascade import CascadeMetrics, CascadeSettings, LunaJudgeOutput, RouteBCascadeJudge, candidate_id
-from .summary import NewsSummarizer, SummaryError, SummaryOutput
+from .summary import NewsSummarizer, SummaryError, SummaryMetrics, SummaryOutput
 
 __all__ = [
     "JudgeError",
@@ -15,6 +15,7 @@ __all__ = [
     "RouteBCausalMaterialityJudge",
     "RouteBCascadeJudge",
     "SummaryError",
+    "SummaryMetrics",
     "SummaryOutput",
     "candidate_id",
 ]

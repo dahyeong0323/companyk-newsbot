@@ -15,6 +15,8 @@ from companyk_newsbot.ranking import RankedNewsItem
 class EmailNewsItem:
     item: RankedNewsItem
     summary: SummaryOutput
+    summary_evidence_retry_count: int = 0
+    summary_failure: bool = False
 
     def __post_init__(self) -> None:
         if self.item.route == "external" and not self.summary.why_it_matters:
@@ -70,13 +72,19 @@ class HtmlEmailRenderer:
         title = escape(item.article_title)
         url = escape(item.article_url, quote=True)
         main_summary = escape(summary.summary)
+        source = item.direct_match.article.source if item.direct_match else item.external_match.candidate.article.source
+        coverage = escape(source)
+        if item.coverage_count > 1:
+            coverage += f" · 외 {item.coverage_count - 1}개 매체 보도"
+        company_label = "영향" if item.route == "external" and len(item.impacted_companies) > 1 else "회사"
         insight = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>투자자 관점:</strong> {escape(summary.insight_one_liner or '')}</p>"
         why = ""
         if external:
             why = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>왜 이 회사에 중요한가:</strong> {escape(summary.why_it_matters or '')}</p>"
         return f"""<article style="margin:12px 0;padding:18px 20px;border:1px solid #e3e8ef;border-radius:9px">
-<div style="font-size:13px;font-weight:bold;color:#315ea8">{company}</div>
+<div style="font-size:13px;font-weight:bold;color:#315ea8">{company_label}: {company}</div>
 <a href="{url}" style="display:block;margin-top:6px;color:#172033;font-size:16px;font-weight:bold;line-height:1.4;text-decoration:none">{title}</a>
+<div style="margin-top:6px;font-size:12px;color:#697386">{coverage}</div>
 <p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#34445e">{main_summary}</p>{insight}{why}
 <p style="margin:12px 0 0;font-size:12px"><a href="{url}" style="color:#315ea8">기사 보기</a></p>
 </article>"""

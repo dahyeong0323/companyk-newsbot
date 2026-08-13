@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 
 from companyk_newsbot.judges.route_b import JudgedRouteBCandidate
 from companyk_newsbot.rules import RouteAMatch
+
+if TYPE_CHECKING:
+    from companyk_newsbot.dedup.event import EventCluster
+    from companyk_newsbot.dedup.external import ExternalEventCluster
 
 
 Route = Literal["direct", "external"]
@@ -25,6 +29,10 @@ class RankedNewsItem:
     direct_match: RouteAMatch | None = None
     external_match: JudgedRouteBCandidate | None = None
     impacted_companies: tuple[str, ...] = ()
+    direct_event: "EventCluster | None" = None
+    external_event: "ExternalEventCluster | None" = None
+    event_id: str = ""
+    coverage_count: int = 1
 
     @classmethod
     def from_direct(cls, match: RouteAMatch, *, materiality: Materiality = "medium") -> "RankedNewsItem":
@@ -38,6 +46,11 @@ class RankedNewsItem:
             direct_match=match,
             impacted_companies=(match.company,),
         )
+
+    @classmethod
+    def from_direct_event(cls, event: "EventCluster", *, materiality: Materiality = "medium") -> "RankedNewsItem":
+        item = cls.from_direct(event.primary, materiality=materiality)
+        return cls(**{**item.__dict__, "direct_event": event, "event_id": event.event_id, "coverage_count": event.coverage_count})
 
     @classmethod
     def from_external(cls, judged: JudgedRouteBCandidate) -> "RankedNewsItem":
@@ -56,7 +69,7 @@ class RankedNewsItem:
         )
 
     @classmethod
-    def from_external_event(cls, event: Any) -> "RankedNewsItem":
+    def from_external_event(cls, event: "ExternalEventCluster") -> "RankedNewsItem":
         """One external event gets one global slot while retaining all company impacts."""
         representative = event.representative
         decision = representative.decision
@@ -66,7 +79,8 @@ class RankedNewsItem:
         return cls(
             route="external", company=" · ".join(companies), article_title=representative.candidate.article.title,
             article_url=representative.candidate.article.canonical_url, published_at=representative.candidate.article.published_at,
-            materiality=decision.materiality, external_match=representative, impacted_companies=companies,
+            materiality=event.materiality, external_match=representative, impacted_companies=companies,
+            external_event=event, event_id=event.event_id, coverage_count=event.coverage_count,
         )
 
 

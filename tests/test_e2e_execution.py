@@ -102,15 +102,20 @@ def test_zero_item_smoke_is_inconclusive_and_skips_email(monkeypatch, tmp_path) 
 
 def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypatch, tmp_path) -> None:
     configure_safe_environment(monkeypatch)
+    monkeypatch.delenv("SUMMARY_MODEL", raising=False)
+    monkeypatch.delenv("SUMMARY_REASONING", raising=False)
     FakeCollector.articles = (article(),)
     recipients = []
+    summary_settings = []
 
     class FakeSummarizer:
         def __init__(self, *args, **kwargs):
-            pass
+            summary_settings.append((kwargs["model"], kwargs["reasoning_effort"]))
 
         def summarize(self, item):
-            return SummaryOutput(summary="투자 유치 소식입니다.", insight_one_liner="자금 집행이 다음 확인 변수입니다.", insight_dimension="financing_runway", insight_mode="watchpoint", confidence="medium")
+            source = item.direct_match.article if item.direct_match else item.external_match.candidate.article
+            from companyk_newsbot.dedup import article_id
+            return SummaryOutput(fact_summary="투자 유치 소식입니다.", insight_one_liner="자금 집행이 다음 확인 변수입니다.", insight_dimension="financing_runway", insight_mode="watchpoint", confidence="medium", evidence_article_ids=[article_id(source)])
 
     class FakeSender:
         def __init__(self, settings):
@@ -134,3 +139,4 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
     assert result.summary_calls == 1
     assert result.delivery_id == "delivery-test-id"
     assert recipients == [e2e.TEST_RECIPIENT]
+    assert summary_settings == [("gpt-5.6-sol", "medium")]
