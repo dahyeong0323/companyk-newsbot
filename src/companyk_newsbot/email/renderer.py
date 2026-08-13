@@ -21,6 +21,8 @@ class EmailNewsItem:
             raise ValueError("external email items require why_it_matters")
         if self.item.route == "direct" and self.summary.why_it_matters:
             raise ValueError("direct email items must not include why_it_matters")
+        if not self.summary.insight_one_liner:
+            raise ValueError("email items require a grounded executive insight")
 
 
 @dataclass(frozen=True)
@@ -68,12 +70,13 @@ class HtmlEmailRenderer:
         title = escape(item.article_title)
         url = escape(item.article_url, quote=True)
         main_summary = escape(summary.summary)
+        insight = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>투자자 관점:</strong> {escape(summary.insight_one_liner or '')}</p>"
         why = ""
         if external:
             why = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>왜 이 회사에 중요한가:</strong> {escape(summary.why_it_matters or '')}</p>"
         return f"""<article style="margin:12px 0;padding:18px 20px;border:1px solid #e3e8ef;border-radius:9px">
 <div style="font-size:13px;font-weight:bold;color:#315ea8">{company}</div>
 <a href="{url}" style="display:block;margin-top:6px;color:#172033;font-size:16px;font-weight:bold;line-height:1.4;text-decoration:none">{title}</a>
-<p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#34445e">{main_summary}</p>{why}
+<p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#34445e">{main_summary}</p>{insight}{why}
 <p style="margin:12px 0 0;font-size:12px"><a href="{url}" style="color:#315ea8">기사 보기</a></p>
 </article>"""

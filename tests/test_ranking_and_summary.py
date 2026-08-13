@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from companyk_newsbot.judges import JudgeOutput, JudgedRouteBCandidate, NewsSummarizer, SummaryError, SummaryOutput
+from companyk_newsbot.dedup.event import article_id
 from companyk_newsbot.models import Article
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import RouteAMatch, RouteBCandidate
@@ -23,6 +24,11 @@ def external(company: str, title: str, materiality: str = "high") -> RankedNewsI
     candidate = RouteBCandidate(article(title), company, "exposure", "subject", ("competition",))
     decision = JudgeOutput(qualifies=True, company=company, exposure_id="exposure", event_family="competition", materiality=materiality, impact_direction="mixed", causal_mechanism="Specific causal mechanism.", rejection_reason="none")  # type: ignore[arg-type]
     return RankedNewsItem.from_external(JudgedRouteBCandidate(candidate, decision, "test", "test"))
+
+
+def grounded(item: RankedNewsItem, *, why: str | None = None) -> SummaryOutput:
+    article_value = item.direct_match.article if item.direct_match else item.external_match.candidate.article
+    return SummaryOutput(summary="Factual summary.", why_it_matters=why, insight_one_liner="The concrete next variable is execution.", insight_dimension="strategy", insight_mode="watchpoint", confidence="medium", evidence_article_ids=[article_id(article_value)])
 
 
 def test_ranker_applies_route_materiality_order_and_company_cap() -> None:
@@ -46,6 +52,14 @@ class FakeClient:
 
 
 def test_summarizer_requires_why_for_external_and_hides_internal_ids() -> None:
+    item = external("A", "fee change")
+    client = FakeClient(grounded(item, why="Margin pressure is approved context."))
+    result = NewsSummarizer(client, model="test").summarize(item)
+    assert result.why_it_matters
+    payload = client.responses.calls[0]["input"][1]["content"]
+    assert "exposure_id" not in payload
+    assert '"exposure"' not in payload
+    return
     client = FakeClient(SummaryOutput(summary="플랫폼 수수료가 변경됐다.", why_it_matters="수익성에 영향을 줄 수 있다."))
     result = NewsSummarizer(client, model="test").summarize(external("A", "fee change"))
     assert result.why_it_matters

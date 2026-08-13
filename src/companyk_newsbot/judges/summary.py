@@ -18,14 +18,28 @@ short sentences. For an external-impact item, add a company-specific why_it_matt
 one short sentence based on the approved causal mechanism. Do not add facts."""
 
 
+SUMMARY_SYSTEM_PROMPT = """Write a concise Korean factual event summary and a one-sentence executive or investment insight.
+Use only supplied evidence and approved qualification context. Do not invent valuation, ownership, runway,
+revenue, market share, probability, timeline, or causal claims. If no defensible implication follows, use
+insight_mode=watchpoint and identify the concrete next variable. Return only supplied evidence_article_ids.
+Every output requires summary, insight_one_liner, insight_dimension, insight_mode, confidence, and evidence_article_ids."""
+
+
 class SummaryOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1, max_length=500)
     why_it_matters: str | None = Field(default=None, max_length=350)
+    insight_one_liner: str | None = Field(default=None, min_length=1, max_length=500)
+    insight_dimension: Literal["exit_liquidity", "financing_runway", "valuation_comps", "revenue_traction", "regulatory_clinical", "commercialization", "cost_supply", "customer_platform", "competition", "governance", "strategy", "other"] | None = None
+    insight_mode: Literal["implication", "watchpoint"] | None = None
+    confidence: Literal["high", "medium"] | None = None
+    evidence_article_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def external_summary_requires_why(self) -> "SummaryOutput":
+        if self.insight_one_liner and (self.insight_dimension is None or self.insight_mode is None or self.confidence is None):
+            raise ValueError("insight requires dimension, mode, and confidence")
         return self
 
 
@@ -66,6 +80,12 @@ class NewsSummarizer:
             raise SummaryError("external-impact summaries must include why_it_matters")
         if item.route == "direct" and parsed.why_it_matters:
             raise SummaryError("direct-company summaries must not include why_it_matters")
+        if not parsed.insight_one_liner:
+            raise SummaryError("every final event requires an executive insight")
+        from companyk_newsbot.dedup.event import article_id
+        article = item.direct_match.article if item.direct_match else item.external_match.candidate.article
+        if not parsed.evidence_article_ids or not set(parsed.evidence_article_ids).issubset({article_id(article)}):
+            raise SummaryError("summary returned an unknown evidence article ID")
         return parsed
 
     @staticmethod
@@ -77,10 +97,14 @@ class NewsSummarizer:
             "article": {"title": item.article_title, "url": item.article_url},
         }
         if item.direct_match:
+            from companyk_newsbot.dedup.event import article_id
+            context["article"]["article_id"] = article_id(item.direct_match.article)
             context["article"].update(
                 {"description": item.direct_match.article.description, "text": item.direct_match.article.text}
             )
         if item.external_match:
+            from companyk_newsbot.dedup.event import article_id
+            context["article"]["article_id"] = article_id(item.external_match.candidate.article)
             decision = item.external_match.decision
             context["approved_external_impact"] = {
                 "event_family": decision.event_family,

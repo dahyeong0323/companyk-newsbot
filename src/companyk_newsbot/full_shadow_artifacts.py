@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from companyk_newsbot.dedup import EventCluster
+from companyk_newsbot.dedup import EventCluster, RouteBEventClusterer, article_id
 from companyk_newsbot.email import EmailNewsItem, RenderedEmail
 from companyk_newsbot.judges import JudgedRouteBCandidate
 from companyk_newsbot.rules import RouteBRejection
@@ -17,6 +17,7 @@ from companyk_newsbot.rules import RouteBRejection
 
 def _article(article: Any) -> dict[str, Any]:
     return {
+        "article_id": article_id(article),
         "title": article.title,
         "source": article.source,
         "url": article.canonical_url,
@@ -32,12 +33,14 @@ def _event_id(cluster: EventCluster) -> str:
 def _route_a_event(cluster: EventCluster) -> dict[str, Any]:
     members = (cluster.primary, *cluster.coverage)
     return {
-        "event_cluster_id": _event_id(cluster),
+        "event_id": cluster.event_id or _event_id(cluster),
         "company": cluster.company,
         "matched_aliases": list(cluster.primary.matched_terms),
         "primary_article": _article(cluster.primary.article),
         "duplicate_membership": [_article(member.article) for member in members],
         "coverage_count": cluster.coverage_count,
+        "event_anchors": {"tokens": sorted(cluster.anchors.tokens) if cluster.anchors else [], "numbers": sorted(cluster.anchors.numbers) if cluster.anchors else []},
+        "representative_score": (cluster.representative_scores or {}).get(article_id(cluster.primary.article)).payload() if (cluster.representative_scores or {}).get(article_id(cluster.primary.article)) else None,
     }
 
 
@@ -102,6 +105,11 @@ def _final_item(position: int, email_item: EmailNewsItem) -> dict[str, Any]:
         "materiality": item.materiality,
         "summary": email_item.summary.summary,
         "why_it_matters": email_item.summary.why_it_matters,
+        "insight_one_liner": email_item.summary.insight_one_liner,
+        "insight_dimension": email_item.summary.insight_dimension,
+        "insight_mode": email_item.summary.insight_mode,
+        "insight_confidence": email_item.summary.confidence,
+        "evidence_article_ids": email_item.summary.evidence_article_ids,
     }
     if item.direct_match:
         payload["route_a"] = {"matched_aliases": list(item.direct_match.matched_terms)}
@@ -144,6 +152,10 @@ def write_full_shadow_artifacts(
             },
             "route_a_events": [_route_a_event(event) for event in route_a_events],
             "route_b": {
+                "events": [
+                    {"event_id": event.event_id, "event_family": event.event_family, "representative_article": _article(event.representative.candidate.article), "coverage_count": event.coverage_count, "coverage_articles": [_article(value.candidate.article) for value in event.coverage], "impacted_companies": list(event.companies), "impact_links": [_judged(value) for value in event.impact_links], "event_anchors": {"tokens": sorted(event.anchors.tokens), "numbers": sorted(event.anchors.numbers)}}
+                    for event in RouteBEventClusterer().cluster(value for value in judged if value.decision.qualifies)
+                ],
                 "judgments": [_judged(value) for value in judged],
                 "rejected_sample": _rejection_sample(judged),
                 "prefilter_rejections": [

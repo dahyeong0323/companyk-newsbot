@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 
-from companyk_newsbot.dedup import ArticleDeduplicator, ArticleDeduplicationResult, RouteAEventClusterer
+from companyk_newsbot.dedup import ArticleDeduplicator, ArticleDeduplicationResult, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, RenderedEmail
 from companyk_newsbot.judges import JudgedRouteBCandidate, SummaryOutput
 from companyk_newsbot.models import Article
@@ -46,6 +46,7 @@ class NewsPipeline:
         candidate_result = self.route_b_generator.generate(article_dedup.articles)
         judged = [self.route_b_judge(candidate) for candidate in candidate_result.candidates]
         accepted = [result for result in judged if result.decision.qualifies]
-        ranked = self.ranker.rank([*direct_items, *(RankedNewsItem.from_external(result) for result in accepted)])
+        external_events = RouteBEventClusterer().cluster(accepted)
+        ranked = self.ranker.rank([*direct_items, *(RankedNewsItem.from_external_event(event) for event in external_events)])
         rendered = self.renderer.render([EmailNewsItem(item, self.summarize(item)) for item in ranked], report_date=report_date)
         return PipelineResult(article_dedup, len(route_a_clusters), len(candidate_result.candidates), len(accepted), len(candidate_result.rejections) + len(judged) - len(accepted), tuple(ranked), rendered)

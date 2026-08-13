@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
 from companyk_newsbot.config import KeywordMapConfig
-from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
+from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
@@ -362,10 +362,11 @@ def run_real_e2e(
         **cascade_metrics,
     )
 
+    route_b_events = RouteBEventClusterer().cluster(accepted)
     ranked = NewsRanker().rank(
         [
             *(RankedNewsItem.from_direct(event.primary) for event in route_a_events),
-            *(RankedNewsItem.from_external(result) for result in accepted),
+            *(RankedNewsItem.from_external_event(event) for event in route_b_events),
         ]
     )
     unsent: list[RankedNewsItem] = []

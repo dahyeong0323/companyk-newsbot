@@ -22,7 +22,7 @@ def test_pipeline_runs_article_to_html_with_direct_dedup_and_external_impact() -
     def judge(candidate):
         return JudgedRouteBCandidate(candidate, JudgeOutput(qualifies=True, company="External Co", exposure_id="play_fee", event_family="platform_infrastructure_dependency", materiality="high", impact_direction="negative", causal_mechanism="Fee increase affects margin.", rejection_reason="none"), "test", "test")
     def summarize(item):
-        return SummaryOutput(summary=f"{item.company} summary.", why_it_matters="Margin pressure." if item.route == "external" else None)
+        return SummaryOutput(summary=f"{item.company} summary.", why_it_matters="Margin pressure." if item.route == "external" else None, insight_one_liner="The next variable is execution.", insight_dimension="strategy", insight_mode="watchpoint", confidence="medium")
     pipeline = NewsPipeline(route_a_detector=RouteADetector(value), route_b_generator=RouteBCandidateGenerator(ExposureRegistry(value)), route_b_judge=judge, summarize=summarize)
     result = pipeline.run([article("Direct Co raises funding", "https://example.com/direct", "Direct Co"), article("Direct Co raises funding", "https://example.com/direct", "Direct Co", 9), article("Google announces Play fee increase", "https://example.com/external", "Google Play fee")], report_date=date(2026, 8, 12))
     assert len(result.article_dedup.articles) == 2

@@ -15,14 +15,14 @@ def article(title: str) -> Article:
 
 def direct_item() -> EmailNewsItem:
     match = RouteAMatch("Direct <Co>", ("Direct",), article("Funding <announced>"))
-    return EmailNewsItem(RankedNewsItem.from_direct(match), SummaryOutput(summary="투자 유치 소식입니다."))
+    return EmailNewsItem(RankedNewsItem.from_direct(match), SummaryOutput(summary="투자 유치 소식입니다.", insight_one_liner="자금 집행 속도가 다음 확인 변수다.", insight_dimension="financing_runway", insight_mode="watchpoint", confidence="medium"))
 
 
 def external_item() -> EmailNewsItem:
     candidate = RouteBCandidate(article("Platform fee change"), "External Co", "internal-id", "Platform billing", ("platform_infrastructure_dependency",))
     decision = JudgeOutput(qualifies=True, company="External Co", exposure_id="internal-id", event_family="platform_infrastructure_dependency", materiality="high", impact_direction="negative", causal_mechanism="Cost pressure", rejection_reason="none")
     ranked = RankedNewsItem.from_external(JudgedRouteBCandidate(candidate, decision, "test", "test-model"))
-    return EmailNewsItem(ranked, SummaryOutput(summary="플랫폼 수수료 변경이 발표됐습니다.", why_it_matters="수수료 부담이 수익성에 영향을 줄 수 있습니다."))
+    return EmailNewsItem(ranked, SummaryOutput(summary="플랫폼 수수료 변경이 발표됐습니다.", why_it_matters="수수료 부담이 수익성에 영향을 줄 수 있습니다.", insight_one_liner="단가 전가 여부가 다음 수익성 변수다.", insight_dimension="cost_supply", insight_mode="watchpoint", confidence="medium"))
 
 
 def test_renderer_separates_routes_and_escapes_untrusted_content() -> None:

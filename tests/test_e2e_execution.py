@@ -110,7 +110,7 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
             pass
 
         def summarize(self, item):
-            return SummaryOutput(summary="투자 유치 소식입니다.")
+            return SummaryOutput(summary="투자 유치 소식입니다.", insight_one_liner="자금 집행이 다음 확인 변수입니다.", insight_dimension="financing_runway", insight_mode="watchpoint", confidence="medium")
 
     class FakeSender:
         def __init__(self, settings):
