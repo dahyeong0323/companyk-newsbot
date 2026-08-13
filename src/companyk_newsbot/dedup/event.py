@@ -89,12 +89,24 @@ def deterministic_pair_decision(
         return "SAME_EVENT", "exact_normalized_title"
     left_title, right_title = normalized_title(left.title), normalized_title(right.title)
     ratio = SequenceMatcher(None, left_title, right_title).ratio()
-    distinctive = left_anchors.distinctive_overlap(right_anchors)
+    if left_anchors.has_partial_distinctive_mismatch(right_anchors):
+        return "AMBIGUOUS", "partial_distinctive_anchor_mismatch"
+    identity_categories = left_anchors.shared_identity_categories(right_anchors)
     subject_overlap = left_anchors.subject_terms & right_anchors.subject_terms
-    if ratio >= 0.84 and distinctive and subject_overlap:
+    primary_action_shared = bool(
+        left_anchors.primary_action_terms
+        and left_anchors.primary_action_terms == right_anchors.primary_action_terms
+    )
+    milestone_shared = bool(
+        left_anchors.milestone_terms
+        and left_anchors.milestone_terms == right_anchors.milestone_terms
+    )
+    if ratio >= 0.92 and identity_categories and subject_overlap:
         return "SAME_EVENT", "high_title_similarity_with_distinctive_anchor"
-    if len(distinctive) >= 2 and subject_overlap:
-        return "SAME_EVENT", "multiple_distinctive_shared_anchors"
+    if len(identity_categories) >= 2 and primary_action_shared and subject_overlap:
+        return "SAME_EVENT", "multiple_canonical_identity_anchors"
+    if identity_categories and primary_action_shared and milestone_shared and subject_overlap:
+        return "SAME_EVENT", "canonical_identity_action_milestone_combination"
     return "AMBIGUOUS", "insufficient_distinctive_event_identity"
 
 

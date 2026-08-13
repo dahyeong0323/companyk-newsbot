@@ -20,8 +20,8 @@ from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
-from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
-from companyk_newsbot.judges import NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
+from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
+from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
 from companyk_newsbot.state import JsonStateStore
@@ -221,6 +221,14 @@ def run_real_e2e(
     if settings is not None:
         _assert_test_recipient(settings)
 
+    artifact_journal: FullShadowArtifactJournal | None = None
+    if profile == "full_shadow":
+        try:
+            artifact_dir = preflight_artifact_dir(os.getenv("ARTIFACT_DIR", ""))
+            artifact_journal = FullShadowArtifactJournal(artifact_dir, run_time)
+        except Exception as exc:
+            raise E2EExecutionError("artifact_storage", str(exc)) from exc
+
     registry = ExposureRegistry(config)
     query_plan = build_query_plan(config, profile=profile)
     delivery_checkpoint_before = store.last_delivery_datetime()
@@ -254,6 +262,8 @@ def run_real_e2e(
 
         collection_result = asyncio.run(collect_all())
     except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"collection: {exc}")
         raise E2EExecutionError("collection", str(exc)) from exc
     collection_seconds = _seconds(collection_started)
     for failure in collection_result.failures:
@@ -264,10 +274,33 @@ def run_real_e2e(
             reason=failure.error or failure.status,
         )
     collected = list(collection_result.articles)
+    if artifact_journal:
+        artifact_journal.update("collection", journal_collection_data(
+            collected,
+            query_count=len(query_plan.queries),
+            collection_successes=len(collection_result.successes),
+            collection_failures=len(collection_result.failures),
+            collected=len(collected),
+            freshness_accepted=None,
+        ))
     freshness_started = monotonic()
-    freshness = filter_articles(collected, window=freshness_window)
+    try:
+        freshness = filter_articles(collected, window=freshness_window)
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"freshness: {exc}")
+        raise E2EExecutionError("freshness", str(exc)) from exc
     freshness_seconds = _seconds(freshness_started)
     fresh_articles = list(freshness.accepted)
+    if artifact_journal:
+        artifact_journal.update("collection", journal_collection_data(
+            collected,
+            query_count=len(query_plan.queries),
+            collection_successes=len(collection_result.successes),
+            collection_failures=len(collection_result.failures),
+            collected=len(collected),
+            freshness_accepted=len(fresh_articles),
+        ))
     _log(
         "collection_complete",
         query_count=len(query_plan.queries),
@@ -289,6 +322,8 @@ def run_real_e2e(
     try:
         article_dedup = ArticleDeduplicator().deduplicate(fresh_articles)
     except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"article_dedup: {exc}")
         raise E2EExecutionError("article_dedup", str(exc)) from exc
     dedup_seconds = _seconds(dedup_started)
     article_duplicates = sum(len(group.duplicates) for group in article_dedup.duplicate_groups)
@@ -308,6 +343,8 @@ def run_real_e2e(
         route_a_events = route_a_clusterer.cluster(route_a_matches)
         candidate_result = RouteBCandidateGenerator(registry).generate(article_dedup.articles)
     except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"deterministic_routing: {exc}")
         raise E2EExecutionError("deterministic_routing", str(exc)) from exc
     routing_seconds = _seconds(routing_started)
     reasons = Counter(rejection.reason for rejection in candidate_result.rejections)
@@ -352,9 +389,13 @@ def run_real_e2e(
                 if not result.decision.qualifies:
                     reasons[f"judge:{result.decision.rejection_reason}"] += 1
     except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"route_b_openai_judge: {exc}")
         raise E2EExecutionError("route_b_openai_judge", str(exc)) from exc
     judge_seconds = _seconds(judge_started)
     accepted = [result for result in judged if result.decision.qualifies]
+    if artifact_journal:
+        artifact_journal.update("qualification", journal_qualification_data(judged, candidate_result.rejections))
     _log(
         "judge_complete",
         openai_model=openai_model,
@@ -366,7 +407,23 @@ def run_real_e2e(
     )
 
     route_b_clusterer = RouteBEventClusterer(resolver=event_resolver)
-    route_b_events = route_b_clusterer.cluster(accepted)
+    try:
+        route_b_events = route_b_clusterer.cluster(accepted)
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"route_b_event_dedup: {exc}")
+        raise E2EExecutionError("route_b_event_dedup", str(exc)) from exc
+    if artifact_journal:
+        artifact_journal.update("event_dedup", journal_event_data(
+            route_a_events,
+            route_b_events,
+            route_a_events_before_dedup=len(route_a_matches),
+            route_a_events_after_dedup=len(route_a_events),
+            route_b_events_before_dedup=len({result.candidate.article.canonical_url for result in accepted}),
+            route_b_events_after_dedup=len(route_b_events),
+            **{f"route_a_{key}": value for key, value in route_a_clusterer.metrics.payload().items()},
+            **{f"route_b_{key}": value for key, value in route_b_clusterer.metrics.payload().items()},
+        ))
     event_articles_before = len(route_a_matches) + len({result.candidate.article.canonical_url for result in accepted})
     event_count_after = len(route_a_events) + len(route_b_events)
     collapsed_events = max(0, event_articles_before - event_count_after)
@@ -409,6 +466,8 @@ def run_real_e2e(
         already_sent=already_sent,
         same_run_duplicates=same_run_duplicates,
     )
+    if artifact_journal:
+        artifact_journal.update("ranking", journal_ranking_data(unsent))
 
     status: Literal["success", "inconclusive"] = "success"
     email_items: list[EmailNewsItem] = []
@@ -417,7 +476,11 @@ def run_real_e2e(
     email_seconds = 0.0
     delivery_id: str | None = None
     rendered = None
-    summary_metrics: dict[str, int] = {"summary_calls": 0, "summary_evidence_retries": 0, "summary_failures": 0, "insight_implication_count": 0, "insight_watchpoint_count": 0}
+    summary_metrics: dict[str, int] = {
+        "summary_calls": 0, "summary_retries": 0, "summary_evidence_retries": 0, "summary_failures": 0,
+        "insight_implication_count": 0, "insight_watchpoint_count": 0, "grounding_verifier_calls": 0,
+        "grounding_verifier_failures": 0, "unsupported_implications": 0, "watchpoint_rewrites": 0,
+    }
     if profile == "smoke" and not unsent:
         status = "inconclusive"
         _log(
@@ -435,26 +498,52 @@ def run_real_e2e(
             summary_client = OpenAI(timeout=_openai_timeout_seconds())
             summary_model = os.getenv("SUMMARY_MODEL", "gpt-5.6-sol")
             summary_reasoning = os.getenv("SUMMARY_REASONING", "medium")
+            grounding_model = os.getenv("GROUNDING_MODEL", "gpt-5.6-luna")
+            grounding_reasoning = os.getenv("GROUNDING_REASONING", "medium")
             def summarize_one(item: RankedNewsItem):
-                worker = NewsSummarizer(summary_client, model=summary_model, reasoning_effort=summary_reasoning)
-                output = worker.summarize(item)
-                metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {"summary_calls": 1, "summary_evidence_retries": 0, "summary_failures": 0, "insight_implication_count": int(output.insight_mode == "implication"), "insight_watchpoint_count": int(output.insight_mode == "watchpoint")}
-                return output, metrics
+                verifier = InsightGroundingVerifier(summary_client, model=grounding_model, reasoning_effort=grounding_reasoning)
+                worker = NewsSummarizer(summary_client, model=summary_model, reasoning_effort=summary_reasoning, grounding_verifier=verifier)
+                try:
+                    output = worker.summarize(item)
+                    metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "insight_watchpoint_count": 1}
+                    return item, output, metrics, None
+                except Exception as exc:
+                    metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "summary_failures": 1}
+                    return item, None, metrics, str(exc)
             summary_concurrency = _positive_int_from_environment("SUMMARY_CONCURRENCY", 4)
             with ThreadPoolExecutor(max_workers=summary_concurrency) as pool:
                 summarized = list(pool.map(summarize_one, unsent))
-            outputs = [output for output, _ in summarized]
-            summary_metrics = {key: sum(metrics[key] for _, metrics in summarized) for key in summary_metrics}
+            summary_metrics = {key: sum(metrics.get(key, 0) for _, _, metrics, _ in summarized) for key in summary_metrics}
             email_items = [
                 EmailNewsItem(
                     item,
                     output,
-                    summary_evidence_retry_count=metrics["summary_evidence_retries"],
-                    summary_failure=bool(metrics["summary_failures"]),
+                    summary_retry_count=metrics["summary_retries"],
                 )
-                for item, (output, metrics) in zip(unsent, summarized)
+                for item, output, metrics, failure in summarized
+                if output is not None and failure is None
             ]
+            summary_failures = [
+                {"event_id": item.event_id, "error": failure, "metrics": metrics}
+                for item, output, metrics, failure in summarized
+                if failure is not None
+            ]
+            if artifact_journal:
+                artifact_journal.update("summary", {
+                    "metrics": summary_metrics,
+                    "successful_items": [{"event_id": value.item.event_id, "summary": value.summary.model_dump()} for value in email_items],
+                    "failed_items": summary_failures,
+                }, run_status="partial" if summary_failures else "running")
+            if summary_failures:
+                failed_ids = [value["event_id"] for value in summary_failures]
+                if artifact_journal:
+                    artifact_journal.fail("one or more final summaries failed", failed_item_ids=failed_ids)
+                raise E2EExecutionError("openai_summary", f"final summary failed for event(s): {', '.join(failed_ids)}")
         except Exception as exc:
+            if artifact_journal and not isinstance(exc, E2EExecutionError):
+                artifact_journal.fail(str(exc))
+            if isinstance(exc, E2EExecutionError):
+                raise
             raise E2EExecutionError("openai_summary", str(exc)) from exc
         summary_seconds = _seconds(summary_started)
         _log("summary_complete", summary_seconds=summary_seconds, **summary_metrics)
@@ -473,6 +562,8 @@ def run_real_e2e(
                 email_seconds = _seconds(email_started)
         except Exception as exc:
             stage = "resend_delivery" if settings is not None else "email_render"
+            if artifact_journal:
+                artifact_journal.fail(f"{stage}: {exc}")
             raise E2EExecutionError(stage, str(exc)) from exc
         _log(
             "email_complete",
@@ -489,11 +580,6 @@ def run_real_e2e(
     artifact_json_path: str | None = None
     artifact_html_path: str | None = None
     if profile == "full_shadow":
-        if not os.getenv("ARTIFACT_DIR", "").strip():
-            raise E2EExecutionError(
-                "artifact_storage",
-                "full_shadow requires ARTIFACT_DIR on a mounted persistent Railway Volume; refusing ephemeral artifacts",
-            )
         if rendered is None:  # pragma: no cover - full shadow always renders, including an empty report
             raise E2EExecutionError("full_shadow_artifact", "full-shadow email report was not rendered")
         artifact_started = monotonic()
@@ -558,8 +644,11 @@ def run_real_e2e(
                 route_b_events=route_b_events,
                 judged=judged,
                 prefilter_rejections=candidate_result.rejections,
+                journal=artifact_journal,
             )
         except Exception as exc:
+            if artifact_journal:
+                artifact_journal.fail(f"full_shadow_artifact: {exc}")
             raise E2EExecutionError("full_shadow_artifact", str(exc)) from exc
         _log(
             "full_shadow_artifacts_complete",

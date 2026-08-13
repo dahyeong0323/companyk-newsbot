@@ -15,8 +15,8 @@ from companyk_newsbot.ranking import RankedNewsItem
 class EmailNewsItem:
     item: RankedNewsItem
     summary: SummaryOutput
-    summary_evidence_retry_count: int = 0
-    summary_failure: bool = False
+    summary_retry_count: int = 0
+    summary_validation_failure: str | None = None
 
     def __post_init__(self) -> None:
         if self.item.route == "external" and not self.summary.why_it_matters:

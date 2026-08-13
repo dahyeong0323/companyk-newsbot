@@ -58,7 +58,12 @@ def test_event_cluster_groups_same_company_cross_publication_coverage() -> None:
         published_at=datetime(2026, 8, 11, 9, 0, tzinfo=UTC),
     )
 
-    clusters = RouteAEventClusterer().cluster([later, early])
+    class Same:
+        def resolve(self, left, right):
+            from companyk_newsbot.dedup import ResolverResult
+            return ResolverResult("SAME_EVENT", "same funding fixture", True)
+
+    clusters = RouteAEventClusterer(resolver=Same()).cluster([later, early])
 
     assert len(clusters) == 1
     assert clusters[0].primary == early

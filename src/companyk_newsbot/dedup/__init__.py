@@ -3,7 +3,7 @@
 from .article import ArticleDeduplicator, ArticleDeduplicationResult, DuplicateArticleGroup
 from .anchors import EventAnchors
 from .event import EventCluster, EventDedupMetrics, PairDecision, RouteAEventClusterer, article_id
-from .external import ExternalEventCluster, RouteBEventClusterer
+from .external import ExactIdentityCollapse, ExternalEventCluster, RouteBEventClusterer
 from .representative import RepresentativeArticleSelector, RepresentativeScore
 from .resolver import EventPairResolver, EventResolverOutput, LunaEventPairResolver, ResolverResult
 
@@ -16,6 +16,7 @@ __all__ = [
     "EventDedupMetrics",
     "EventPairResolver",
     "EventResolverOutput",
+    "ExactIdentityCollapse",
     "ExternalEventCluster",
     "LunaEventPairResolver",
     "PairDecision",

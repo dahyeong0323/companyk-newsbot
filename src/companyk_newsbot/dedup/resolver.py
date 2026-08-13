@@ -59,7 +59,15 @@ class LunaEventPairResolver:
             return ResolverResult(parsed.decision, parsed.short_reason, True)
         except Exception as exc:
             name = type(exc).__name__.casefold()
-            failure = "timeout" if "timeout" in name else "client_error"
+            status_code = getattr(exc, "status_code", None)
+            if "timeout" in name:
+                failure = "timeout"
+            elif status_code == 429:
+                failure = "rate_limit_exhausted"
+            elif isinstance(status_code, int) and status_code >= 500:
+                failure = "server_error_exhausted"
+            else:
+                failure = "client_error"
             return ResolverResult("DIFFERENT_EVENT", "resolver failure; kept separate", True, failure)
 
 

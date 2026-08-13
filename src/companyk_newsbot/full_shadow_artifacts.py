@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Iterable
 
 from companyk_newsbot.dedup import EventCluster, ExternalEventCluster, article_id
@@ -65,6 +67,7 @@ def _route_b_event(event: ExternalEventCluster) -> dict[str, Any]:
         "coverage_count": event.coverage_count,
         "event_anchors": event.anchors.payload(),
         "pairwise_dedup_decisions": [decision.payload() for decision in event.dedup_decisions],
+        "exact_identity_collapses": [collapse.payload() for collapse in event.exact_identity_collapses],
         "impact_links": [_judged(value) for value in event.impact_links],
         "aggregate_materiality": event.materiality,
     }
@@ -136,8 +139,10 @@ def _final_item(position: int, email_item: EmailNewsItem) -> dict[str, Any]:
         "insight_mode": email_item.summary.insight_mode,
         "insight_confidence": email_item.summary.confidence,
         "evidence_article_ids": email_item.summary.evidence_article_ids,
-        "summary_evidence_retry_count": email_item.summary_evidence_retry_count,
-        "summary_failure": email_item.summary_failure,
+        "summary_retry_count": email_item.summary_retry_count,
+        "summary_evidence_retry_count": email_item.summary_retry_count,
+        "summary_validation_failure": email_item.summary_validation_failure,
+        "summary_failure": email_item.summary_validation_failure is not None,
         "event_id": item.event_id,
         "coverage_count": item.coverage_count,
         "impacted_companies": list(item.impacted_companies),
@@ -147,6 +152,132 @@ def _final_item(position: int, email_item: EmailNewsItem) -> dict[str, Any]:
     if item.external_match:
         payload["route_b"] = _judged(item.external_match)
     return payload
+
+
+def journal_collection_data(articles: Iterable[Any], **metrics: Any) -> dict[str, Any]:
+    return {"metrics": metrics, "articles": [_article(article) for article in articles]}
+
+
+def journal_qualification_data(judged: Iterable[JudgedRouteBCandidate], prefilter_rejections: Iterable[RouteBRejection]) -> dict[str, Any]:
+    return {
+        "judgments": [_judged(value) for value in judged],
+        "prefilter_rejections": [
+            {"article": _article(value.article), "reason": value.reason, "detail": value.detail}
+            for value in prefilter_rejections
+        ],
+    }
+
+
+def journal_event_data(route_a_events: Iterable[EventCluster], route_b_events: Iterable[ExternalEventCluster], **metrics: Any) -> dict[str, Any]:
+    return {
+        "metrics": metrics,
+        "route_a_events": [_route_a_event(event) for event in route_a_events],
+        "route_b_events": [_route_b_event(event) for event in route_b_events],
+    }
+
+
+def journal_ranking_data(items: Iterable[Any]) -> dict[str, Any]:
+    return {
+        "items": [
+            {
+                "event_id": item.event_id,
+                "route": item.route,
+                "company": item.company,
+                "impacted_companies": list(item.impacted_companies),
+                "materiality": item.materiality,
+                "title": item.article_title,
+                "url": item.article_url,
+                "coverage_count": item.coverage_count,
+            }
+            for item in items
+        ]
+    }
+
+
+def _atomic_write_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(value)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def preflight_artifact_dir(configured: str) -> Path:
+    """Validate an absolute writable artifact target before any paid Full Shadow work."""
+    if not configured.strip():
+        raise ValueError("full_shadow requires ARTIFACT_DIR on a mounted persistent Railway Volume")
+    target = Path(configured.strip()).expanduser()
+    if not target.is_absolute():
+        raise ValueError("full_shadow ARTIFACT_DIR must be an absolute persistent path")
+    target.mkdir(parents=True, exist_ok=True)
+    resolved = target.resolve(strict=True)
+    probe_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".newsbot-preflight-", suffix=".tmp", dir=resolved, delete=False) as probe:
+            probe.write("persistent-artifact-preflight")
+            probe.flush()
+            os.fsync(probe.fileno())
+            probe_name = probe.name
+    finally:
+        if probe_name is not None:
+            Path(probe_name).unlink(missing_ok=True)
+    return resolved
+
+
+class FullShadowArtifactJournal:
+    """Atomically persisted run journal that survives failures after expensive stages."""
+
+    def __init__(self, artifact_dir: Path, run_time: datetime) -> None:
+        stamp = run_time.strftime("%Y%m%dT%H%M%SZ")
+        suffix = ""
+        sequence = 0
+        while (artifact_dir / f"full_shadow_{stamp}{suffix}.json").exists():
+            sequence += 1
+            suffix = f"_{sequence:02d}"
+        self.json_path = artifact_dir / f"full_shadow_{stamp}{suffix}.json"
+        self.html_path = artifact_dir / f"full_shadow_{stamp}{suffix}.html"
+        self.payload: dict[str, Any] = {
+            "schema_version": "full_shadow_journal_v1",
+            "run_at": run_time.isoformat(),
+            "run_status": "running",
+            "last_completed_stage": "preflight",
+            "fatal_error": None,
+            "failed_item_ids": [],
+            "artifact_updated_at": datetime.now(UTC).isoformat(),
+            "stages": {"preflight": {"artifact_dir": str(artifact_dir)}},
+        }
+        self._persist()
+
+    def update(self, stage: str, data: dict[str, Any], *, run_status: str = "running") -> None:
+        self.payload["stages"][stage] = data
+        self.payload["last_completed_stage"] = stage
+        self.payload["run_status"] = run_status
+        self.payload["artifact_updated_at"] = datetime.now(UTC).isoformat()
+        self._persist()
+
+    def fail(self, error: str, *, failed_item_ids: Iterable[str] = ()) -> None:
+        self.payload["run_status"] = "failed"
+        self.payload["fatal_error"] = error
+        self.payload["failed_item_ids"] = list(failed_item_ids)
+        self.payload["artifact_updated_at"] = datetime.now(UTC).isoformat()
+        self._persist()
+
+    def complete(self, payload: dict[str, Any], html: str) -> tuple[str, str]:
+        payload["run_status"] = "success"
+        payload["last_completed_stage"] = "complete"
+        payload["fatal_error"] = None
+        payload["failed_item_ids"] = []
+        payload["artifact_updated_at"] = datetime.now(UTC).isoformat()
+        payload["debug"]["journal_stages"] = self.payload["stages"]
+        _atomic_write_text(self.json_path, json.dumps(payload, ensure_ascii=False, indent=2))
+        _atomic_write_text(self.html_path, html)
+        self.payload = payload
+        return str(self.json_path), str(self.html_path)
+
+    def _persist(self) -> None:
+        _atomic_write_text(self.json_path, json.dumps(self.payload, ensure_ascii=False, indent=2))
 
 
 def write_full_shadow_artifacts(
@@ -161,12 +292,11 @@ def write_full_shadow_artifacts(
     route_b_events: list[ExternalEventCluster],
     judged: list[JudgedRouteBCandidate],
     prefilter_rejections: Iterable[RouteBRejection],
+    journal: FullShadowArtifactJournal | None = None,
 ) -> tuple[str, str]:
     """Persist review data separately from the recipient-facing rendered email."""
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    stamp = run_time.strftime("%Y%m%dT%H%M%SZ")
-    json_path = artifact_dir / f"full_shadow_{stamp}.json"
-    html_path = artifact_dir / f"full_shadow_{stamp}.html"
+    journal = journal or FullShadowArtifactJournal(artifact_dir, run_time)
     payload = {
         "schema_version": "full_shadow_review_v1",
         "run_at": run_time.isoformat(),
@@ -195,6 +325,4 @@ def write_full_shadow_artifacts(
             "openai_usage": "not_measured_by_current_sdk_wrapper",
         },
     }
-    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    html_path.write_text(rendered.html, encoding="utf-8")
-    return str(json_path), str(html_path)
+    return journal.complete(payload, rendered.html)

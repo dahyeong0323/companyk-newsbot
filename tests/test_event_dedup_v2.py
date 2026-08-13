@@ -16,7 +16,12 @@ def judged(company: str, title: str, url: str, *, hour: int = 8, family: str = "
 
 
 def test_route_b_one_event_retains_two_company_impact_links() -> None:
-    cluster = RouteBEventClusterer().cluster([
+    class Same:
+        def resolve(self, left, right):
+            from companyk_newsbot.dedup import ResolverResult
+            return ResolverResult("SAME_EVENT", "same penalty fixture", True)
+
+    cluster = RouteBEventClusterer(resolver=Same()).cluster([
         judged("A", "Regulator announces $10m platform penalty", "https://a.example/penalty"),
         judged("B", "Platform receives $10m regulator penalty", "https://b.example/penalty", hour=9),
     ])

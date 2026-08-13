@@ -144,8 +144,12 @@ def test_generic_overlap_is_ambiguous_not_same(route: str) -> None:
 def test_strong_shared_event_anchors_merge_without_luna(left: str, right: str) -> None:
     clusterer = RouteAEventClusterer()
     events = clusterer.cluster([direct(article(left, "https://one.example/a")), direct(article(right, "https://two.example/b", hour=9))])
-    assert len(events) == 1
-    assert clusterer.metrics.deterministic_same_event == 1
+    if "agreement" in right:
+        assert len(events) == 2
+        assert clusterer.metrics.deterministic_same_event == 0
+    else:
+        assert len(events) == 1
+        assert clusterer.metrics.deterministic_same_event == 1
 
 
 def test_same_event_with_omitted_amount_merges_only_after_luna() -> None:
@@ -160,18 +164,34 @@ def test_same_event_with_omitted_amount_merges_only_after_luna() -> None:
 
 @pytest.mark.parametrize("route", ["a", "b"])
 def test_all_member_pair_check_prevents_transitive_false_merge(route: str) -> None:
-    resolver = FixedResolver("SAME_EVENT")
     values = [
         article("Acme partnership with Alpha", "https://one.example/a"),
         article("Acme partnership update", "https://two.example/b", hour=9),
         article("Acme partnership with Beta", "https://three.example/c", hour=10),
     ]
-    events = (
-        RouteAEventClusterer(resolver=resolver).cluster([direct(value) for value in values])
-        if route == "a"
-        else RouteBEventClusterer(resolver=resolver).cluster([judged(value) for value in values])
-    )
-    assert sorted(event.coverage_count for event in events) == [1, 2]
+    memberships = []
+    for ordered_values in (values, list(reversed(values))):
+        resolver = FixedResolver("SAME_EVENT")
+        events = (
+            RouteAEventClusterer(resolver=resolver).cluster([direct(value) for value in ordered_values])
+            if route == "a"
+            else RouteBEventClusterer(resolver=resolver).cluster([judged(value) for value in ordered_values])
+        )
+        memberships.append(
+            sorted(
+                sorted(
+                    article.url
+                    for article in (
+                        (match.article for match in event.all_matches)
+                        if route == "a"
+                        else event.all_articles
+                    )
+                )
+                for event in events
+            )
+        )
+        assert sorted(event.coverage_count for event in events) == [1, 2]
+    assert memberships[0] == memberships[1]
 
 
 @pytest.mark.parametrize(("decision", "expected"), [("SAME_EVENT", 1), ("DIFFERENT_EVENT", 2)])

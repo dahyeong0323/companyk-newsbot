@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from companyk_newsbot.judges import JudgeOutput, JudgedRouteBCandidate, NewsSummarizer, SummaryError, SummaryOutput
+from companyk_newsbot.judges import GroundingVerifierOutput, JudgeOutput, JudgedRouteBCandidate, NewsSummarizer, SummaryError, SummaryOutput
 from companyk_newsbot.dedup.event import article_id
 from companyk_newsbot.models import Article
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
@@ -51,10 +51,15 @@ class FakeClient:
         self.responses = FakeResponses(output)
 
 
+class SupportedVerifier:
+    def verify(self, event_payload, proposed):
+        return GroundingVerifierOutput(decision="SUPPORTED", short_reason="fixture")
+
+
 def test_summarizer_requires_why_for_external_and_hides_internal_ids() -> None:
     item = external("A", "fee change")
     client = FakeClient(grounded(item, why="Margin pressure is approved context."))
-    result = NewsSummarizer(client, model="test").summarize(item)
+    result = NewsSummarizer(client, model="test", grounding_verifier=SupportedVerifier()).summarize(item)
     assert result.why_it_matters
     payload = client.responses.calls[0]["input"][1]["content"]
     assert "exposure_id" not in payload
@@ -63,6 +68,6 @@ def test_summarizer_requires_why_for_external_and_hides_internal_ids() -> None:
 
 def test_summarizer_rejects_wrong_route_summary_shape() -> None:
     with pytest.raises(SummaryError, match="must include why"):
-        NewsSummarizer(FakeClient(grounded(external("A", "fee change"))), model="test").summarize(external("A", "fee change"))
+        NewsSummarizer(FakeClient(grounded(external("A", "fee change"))), model="test", grounding_verifier=SupportedVerifier()).summarize(external("A", "fee change"))
     with pytest.raises(SummaryError, match="must not include"):
-        NewsSummarizer(FakeClient(grounded(direct("A", "direct"), why="불필요")), model="test").summarize(direct("A", "direct"))
+        NewsSummarizer(FakeClient(grounded(direct("A", "direct"), why="불필요")), model="test", grounding_verifier=SupportedVerifier()).summarize(direct("A", "direct"))

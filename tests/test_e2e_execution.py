@@ -111,6 +111,11 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
     class FakeSummarizer:
         def __init__(self, *args, **kwargs):
             summary_settings.append((kwargs["model"], kwargs["reasoning_effort"]))
+            self.metrics = SimpleNamespace(payload=lambda: {
+                "summary_calls": 1, "summary_retries": 0, "summary_evidence_retries": 0, "summary_failures": 0,
+                "insight_implication_count": 0, "insight_watchpoint_count": 1, "grounding_verifier_calls": 0,
+                "grounding_verifier_failures": 0, "unsupported_implications": 0, "watchpoint_rewrites": 0,
+            })
 
         def summarize(self, item):
             source = item.direct_match.article if item.direct_match else item.external_match.candidate.article

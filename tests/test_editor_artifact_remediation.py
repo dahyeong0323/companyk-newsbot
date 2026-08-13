@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from companyk_newsbot.dedup import RouteAEventClusterer, RouteBEventClusterer, article_id
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer
 from companyk_newsbot.full_shadow_artifacts import write_full_shadow_artifacts
-from companyk_newsbot.judges import JudgeOutput, JudgedRouteBCandidate, NewsSummarizer, SummaryError, SummaryOutput
+from companyk_newsbot.judges import GroundingVerifierOutput, JudgeOutput, JudgedRouteBCandidate, NewsSummarizer, SummaryError, SummaryOutput
 from companyk_newsbot.models import Article
 from companyk_newsbot.ranking import RankedNewsItem
 from companyk_newsbot.rules import RouteAMatch, RouteBCandidate
@@ -92,10 +92,15 @@ class FailingResponses:
         raise RuntimeError("structured output unavailable")
 
 
+class SupportedVerifier:
+    def verify(self, event_payload, proposed):
+        return GroundingVerifierOutput(decision="SUPPORTED", short_reason="fixture")
+
+
 def test_route_a_editor_payload_has_representative_and_corroborating_evidence() -> None:
     item = direct_item()
     responses = SequentialResponses(output(item))
-    NewsSummarizer(SimpleNamespace(responses=responses), model="test").summarize(item)
+    NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier()).summarize(item)
     payload = json.loads(responses.calls[0]["input"][1]["content"])
     assert payload["event_id"] == item.event_id
     assert payload["representative_article"]["article_id"] == article_id(item.direct_match.article)
@@ -105,7 +110,7 @@ def test_route_a_editor_payload_has_representative_and_corroborating_evidence() 
 def test_route_b_editor_payload_has_complete_event_and_all_impact_links() -> None:
     item = external_item()
     responses = SequentialResponses(output(item))
-    NewsSummarizer(SimpleNamespace(responses=responses), model="test").summarize(item)
+    NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier()).summarize(item)
     payload = json.loads(responses.calls[0]["input"][1]["content"])
     assert payload["impacted_companies"] == ["A", "B"]
     assert payload["event_materiality"] == "high"
@@ -116,7 +121,7 @@ def test_route_b_editor_payload_has_complete_event_and_all_impact_links() -> Non
 def test_unknown_evidence_id_retries_once_then_succeeds() -> None:
     item = direct_item()
     responses = SequentialResponses(output(item, evidence=["unknown"]), output(item))
-    summarizer = NewsSummarizer(SimpleNamespace(responses=responses), model="test")
+    summarizer = NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier())
     assert summarizer.summarize(item).evidence_article_ids == output(item).evidence_article_ids
     assert len(responses.calls) == 2
     assert summarizer.metrics.evidence_retries == 1
@@ -126,8 +131,8 @@ def test_unknown_evidence_id_retries_once_then_succeeds() -> None:
 def test_second_invalid_evidence_id_is_safe_failure() -> None:
     item = direct_item()
     responses = SequentialResponses(output(item, evidence=["unknown"]), output(item, evidence=["still-unknown"]))
-    summarizer = NewsSummarizer(SimpleNamespace(responses=responses), model="test")
-    with pytest.raises(SummaryError, match="unknown evidence"):
+    summarizer = NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier())
+    with pytest.raises(SummaryError, match="unknown or unsupplied"):
         summarizer.summarize(item)
     assert len(responses.calls) == 2
     assert summarizer.metrics.evidence_retries == summarizer.metrics.failures == 1
@@ -140,13 +145,7 @@ def test_editor_client_or_schema_failure_is_counted_and_fails_safely() -> None:
     assert summarizer.metrics.calls == summarizer.metrics.failures == 1
 
 
-@pytest.mark.parametrize(
-    "missing",
-    [
-        {"evidence_article_ids": []},
-        {"insight_one_liner": ""},
-    ],
-)
+@pytest.mark.parametrize("missing", [{"insight_one_liner": ""}])
 def test_summary_schema_rejects_missing_critical_grounding_fields(missing: dict[str, object]) -> None:
     values: dict[str, object] = {
         "fact_summary": "Fact.",
@@ -164,7 +163,10 @@ def test_summary_schema_rejects_missing_critical_grounding_fields(missing: dict[
 @pytest.mark.parametrize("mode", ["watchpoint", "implication"])
 def test_explicit_insight_modes_are_valid_and_counted(mode: str) -> None:
     item = direct_item()
-    summarizer = NewsSummarizer(SimpleNamespace(responses=SequentialResponses(output(item, mode=mode))), model="test")
+    class Supported:
+        def verify(self, event_payload, proposed):
+            return GroundingVerifierOutput(decision="SUPPORTED", short_reason="fixture")
+    summarizer = NewsSummarizer(SimpleNamespace(responses=SequentialResponses(output(item, mode=mode))), model="test", grounding_verifier=Supported())
     result = summarizer.summarize(item)
     assert result.insight_mode == mode
     assert getattr(summarizer.metrics, f"{mode}_count") == 1
@@ -174,7 +176,7 @@ def test_watchpoint_fallback_is_concrete_and_prompted() -> None:
     item = direct_item()
     result = output(item, mode="watchpoint")
     responses = SequentialResponses(result)
-    assert NewsSummarizer(SimpleNamespace(responses=responses), model="test").summarize(item).insight_one_liner == "Monitor the next disclosed milestone."
+    assert NewsSummarizer(SimpleNamespace(responses=responses), model="test", grounding_verifier=SupportedVerifier()).summarize(item).insight_one_liner == "Monitor the next disclosed milestone."
     system_prompt = responses.calls[0]["input"][0]["content"]
     assert "watchpoint" in system_prompt and "Never invent" in system_prompt
 
@@ -192,7 +194,7 @@ def test_full_shadow_artifact_serializes_event_editor_and_dedup_audit(tmp_path) 
     direct = direct_item()
     external = external_item()
     email_items = [
-        EmailNewsItem(direct, output(direct), summary_evidence_retry_count=1),
+        EmailNewsItem(direct, output(direct), summary_retry_count=1),
         EmailNewsItem(external, output(external)),
     ]
     rendered = HtmlEmailRenderer().render(email_items, report_date=date(2026, 8, 12))
