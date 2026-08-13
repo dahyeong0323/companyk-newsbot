@@ -65,6 +65,14 @@ class SummaryError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class _EditorialSubject:
+    """Minimal immutable identity for replaying a frozen editorial payload."""
+
+    event_id: str
+    route: str
+
+
 class ResponsesParser(Protocol):
     def parse(self, **kwargs: Any) -> Any: ...
 
@@ -157,6 +165,17 @@ class NewsSummarizer:
 
     def summarize(self, item: RankedNewsItem) -> SummaryOutput:
         payload, valid_ids = self._payload(item)
+        return self._summarize_payload(item, payload, valid_ids)
+
+    def summarize_exact_payload(self, *, event_id: str, route: Literal["direct", "external"], payload: dict[str, object], evidence_article_ids: set[str]) -> SummaryOutput:
+        """Replay a previously frozen editor request without recollecting or reranking."""
+        return self._summarize_payload(
+            _EditorialSubject(event_id=event_id, route=route),
+            json.dumps(payload, ensure_ascii=False),
+            evidence_article_ids,
+        )
+
+    def _summarize_payload(self, item: RankedNewsItem | _EditorialSubject, payload: str, valid_ids: set[str]) -> SummaryOutput:
         self.forensic_trace.append({"event": "editorial_begin", "event_id": item.event_id, "exact_editor_input": json.loads(payload)})
         try:
             parsed = self._validated_editor_result(item, payload, valid_ids)

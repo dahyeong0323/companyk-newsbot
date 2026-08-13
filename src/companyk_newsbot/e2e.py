@@ -240,6 +240,14 @@ def _emit_replay_bundle(bundle: dict[str, object], *, chunk_size: int = 6000) ->
     _log("shadow_replay_end", run_id=bundle["run_id"], sha256=digest)
 
 
+def _emit_editorial_traces(run_id: str, traces: list[dict[str, object]]) -> None:
+    """Telemetry must never collide with the structured-log event discriminator."""
+    for trace in traces:
+        trace_for_log = dict(trace)
+        trace_for_log["trace_event"] = trace_for_log.pop("event", None)
+        _log("editorial_trace", run_id=run_id, **trace_for_log)
+
+
 def run_real_e2e(
     config: KeywordMapConfig,
     store: JsonStateStore,
@@ -559,8 +567,7 @@ def run_real_e2e(
                 summarized = list(pool.map(summarize_one, unsent))
             summary_metrics = {key: sum(metrics.get(key, 0) for _, _, metrics, _, _ in summarized) for key in summary_metrics}
             editorial_traces = [trace for _, _, _, _, traces in summarized for trace in traces]
-            for trace in editorial_traces:
-                _log("editorial_trace", run_id=run_id, **trace)
+            _emit_editorial_traces(run_id, editorial_traces)
             email_items = [
                 EmailNewsItem(
                     item,

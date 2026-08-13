@@ -145,3 +145,13 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
     assert result.delivery_id == "delivery-test-id"
     assert recipients == [e2e.TEST_RECIPIENT]
     assert summary_settings == [("gpt-5.6-sol", "medium")]
+
+def test_editorial_trace_log_preserves_nested_event_without_collision(monkeypatch) -> None:
+    import companyk_newsbot.e2e as e2e
+
+    emitted = []
+    monkeypatch.setattr(e2e, "_log", lambda event, **fields: emitted.append((event, fields)))
+    original = {"event": "grounding_verification", "event_id": "event-1"}
+    e2e._emit_editorial_traces("run-1", [original])
+    assert emitted == [("editorial_trace", {"run_id": "run-1", "trace_event": "grounding_verification", "event_id": "event-1"})]
+    assert original["event"] == "grounding_verification"

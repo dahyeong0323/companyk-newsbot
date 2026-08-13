@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from companyk_newsbot.judges import CascadeSettings, LunaJudgeOutput, RouteBCascadeJudge
+from companyk_newsbot.editorial_replay import load_editorial_replay_bundle
 from companyk_newsbot.replay import run_replay
 
 
@@ -24,3 +28,18 @@ def test_replay_compares_luna_to_stored_sol_without_sol_calls(tmp_path: Path) ->
     client = Client(); cascade = RouteBCascadeJudge(client, client, CascadeSettings(luna_rpm_budget=1000, sol_rpm_budget=1000))
     report = asyncio.run(run_replay(source, judge=cascade))
     assert report["old_sol_rejects_accepted_by_luna"]
+
+
+def test_editorial_replay_loader_restores_sha_verified_chunks(tmp_path: Path) -> None:
+    bundle = {"schema_version": "editorial_replay_bundle_v1", "run_id": "run-1", "git_commit": "abc", "events": []}
+    compressed = gzip.compress(json.dumps(bundle).encode())
+    encoded = base64.b64encode(compressed).decode()
+    digest = hashlib.sha256(compressed).hexdigest()
+    path = tmp_path / "forensic.jsonl"
+    path.write_text("\n".join(json.dumps(value) for value in [
+        {"event": "shadow_replay_begin", "chunks": 2, "sha256": digest},
+        {"event": "shadow_replay_chunk", "seq": 1, "data": encoded[:8]},
+        {"event": "shadow_replay_chunk", "seq": 2, "data": encoded[8:]},
+        {"event": "shadow_replay_end", "sha256": digest},
+    ]), encoding="utf-8")
+    assert load_editorial_replay_bundle(path) == bundle
