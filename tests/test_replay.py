@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from companyk_newsbot.judges import CascadeSettings, LunaJudgeOutput, RouteBCascadeJudge
 from companyk_newsbot.editorial_replay import load_editorial_replay_bundle
 from companyk_newsbot.replay import run_replay
@@ -30,7 +32,8 @@ def test_replay_compares_luna_to_stored_sol_without_sol_calls(tmp_path: Path) ->
     assert report["old_sol_rejects_accepted_by_luna"]
 
 
-def test_editorial_replay_loader_restores_sha_verified_chunks(tmp_path: Path) -> None:
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])
+def test_editorial_replay_loader_restores_sha_verified_chunks(tmp_path: Path, encoding: str) -> None:
     bundle = {"schema_version": "editorial_replay_bundle_v1", "run_id": "run-1", "git_commit": "abc", "events": []}
     compressed = gzip.compress(json.dumps(bundle).encode())
     encoded = base64.b64encode(compressed).decode()
@@ -41,5 +44,5 @@ def test_editorial_replay_loader_restores_sha_verified_chunks(tmp_path: Path) ->
         {"event": "shadow_replay_chunk", "seq": 1, "data": encoded[:8]},
         {"event": "shadow_replay_chunk", "seq": 2, "data": encoded[8:]},
         {"event": "shadow_replay_end", "sha256": digest},
-    ]), encoding="utf-8")
+    ]), encoding=encoding)
     assert load_editorial_replay_bundle(path) == bundle

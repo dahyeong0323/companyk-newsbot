@@ -21,7 +21,13 @@ class EditorialReplayError(RuntimeError):
 def load_editorial_replay_bundle(path: Path) -> dict[str, Any]:
     """Restore and integrity-check the gzip/base64 bundle emitted by Full Shadow."""
     try:
-        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            # PowerShell's native-command redirection can produce UTF-16LE.
+            text = raw.decode("utf-16")
+        records = [json.loads(line) for line in text.splitlines() if line.strip()]
         begin = next(value for value in records if value.get("event") == "shadow_replay_begin")
         chunks = sorted((value for value in records if value.get("event") == "shadow_replay_chunk"), key=lambda value: value["seq"])
         end = next(value for value in records if value.get("event") == "shadow_replay_end")
