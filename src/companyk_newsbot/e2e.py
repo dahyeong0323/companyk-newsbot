@@ -7,12 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import asyncio
+import base64
+import gzip
 import hashlib
 import json
 import os
 from time import monotonic
 from typing import Literal
 from pathlib import Path
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
@@ -22,6 +25,7 @@ from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmail
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
 from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
+from companyk_newsbot.judges.summary import NewsSummarizer as EditorialPayloadBuilder
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
 from companyk_newsbot.state import JsonStateStore
@@ -200,7 +204,40 @@ def _fingerprint(item: RankedNewsItem) -> tuple[str, str]:
 
 
 def _log(event: str, **fields: object) -> None:
-    print(json.dumps({"event": event, **fields}, ensure_ascii=False, sort_keys=True))
+    print(json.dumps({"event": event, **fields}, ensure_ascii=False, sort_keys=True), flush=True)
+
+
+def _editorial_replay_bundle(run_id: str, items: list[RankedNewsItem]) -> dict[str, object]:
+    """Freeze the exact post-ranking editor input before any editorial API call."""
+    events: list[dict[str, object]] = []
+    for rank, item in enumerate(items, start=1):
+        # Keep the forensic payload available even when tests substitute the
+        # runtime editor with a lightweight fake.
+        payload, valid_ids = EditorialPayloadBuilder._payload(item)
+        value = json.loads(payload)
+        events.append({
+            "rank": rank, "event_id": item.event_id, "impacted_companies": list(item.impacted_companies),
+            "event_family": value["event_family_context"], "event_anchors": value["canonical_event_anchors"],
+            "impact_links": value.get("approved_impact_links", []), "representative_article": value["representative_article"],
+            "corroborating_articles": value["corroborating_articles"], "exact_editor_input": value,
+            "exact_grounding_evidence_article_ids": sorted(valid_ids),
+        })
+    return {
+        "schema_version": "editorial_replay_bundle_v1", "run_id": run_id,
+        "git_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GITHUB_SHA") or "unknown",
+        "events": events,
+    }
+
+
+def _emit_replay_bundle(bundle: dict[str, object], *, chunk_size: int = 6000) -> None:
+    compressed = gzip.compress(json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    encoded = base64.b64encode(compressed).decode("ascii")
+    digest = hashlib.sha256(compressed).hexdigest()
+    chunks = [encoded[index:index + chunk_size] for index in range(0, len(encoded), chunk_size)] or [""]
+    _log("shadow_replay_begin", run_id=bundle["run_id"], chunks=len(chunks), sha256=digest)
+    for seq, chunk in enumerate(chunks, start=1):
+        _log("shadow_replay_chunk", run_id=bundle["run_id"], seq=seq, data=chunk)
+    _log("shadow_replay_end", run_id=bundle["run_id"], sha256=digest)
 
 
 def run_real_e2e(
@@ -214,6 +251,7 @@ def run_real_e2e(
     """Run real services; only smoke may deliver, and only to the fixed test recipient."""
     total_started = monotonic()
     run_time = (now or datetime.now(UTC)).astimezone(UTC)
+    run_id = f"full_shadow_{run_time.strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:12]}"
     report_date = run_time.astimezone(KST).date()
     if deliver and profile != "smoke":
         raise E2EExecutionError("safety_check", "full_shadow is a non-delivery profile")
@@ -468,6 +506,12 @@ def run_real_e2e(
     )
     if artifact_journal:
         artifact_journal.update("ranking", journal_ranking_data(unsent))
+    replay_bundle: dict[str, object] | None = None
+    if profile == "full_shadow":
+        replay_bundle = _editorial_replay_bundle(run_id, unsent)
+        if artifact_journal:
+            artifact_journal.update("editorial_replay_bundle", replay_bundle)
+        _emit_replay_bundle(replay_bundle)
 
     status: Literal["success", "inconclusive"] = "success"
     email_items: list[EmailNewsItem] = []
@@ -506,31 +550,36 @@ def run_real_e2e(
                 try:
                     output = worker.summarize(item)
                     metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "insight_watchpoint_count": 1}
-                    return item, output, metrics, None
+                    return item, output, metrics, None, getattr(worker, "forensic_trace", [])
                 except Exception as exc:
                     metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "summary_failures": 1}
-                    return item, None, metrics, str(exc)
+                    return item, None, metrics, str(exc), getattr(worker, "forensic_trace", [])
             summary_concurrency = _positive_int_from_environment("SUMMARY_CONCURRENCY", 4)
             with ThreadPoolExecutor(max_workers=summary_concurrency) as pool:
                 summarized = list(pool.map(summarize_one, unsent))
-            summary_metrics = {key: sum(metrics.get(key, 0) for _, _, metrics, _ in summarized) for key in summary_metrics}
+            summary_metrics = {key: sum(metrics.get(key, 0) for _, _, metrics, _, _ in summarized) for key in summary_metrics}
+            editorial_traces = [trace for _, _, _, _, traces in summarized for trace in traces]
+            for trace in editorial_traces:
+                _log("editorial_trace", run_id=run_id, **trace)
             email_items = [
                 EmailNewsItem(
                     item,
                     output,
                     summary_retry_count=metrics["summary_retries"],
                 )
-                for item, output, metrics, failure in summarized
+                for item, output, metrics, failure, _ in summarized
                 if output is not None and failure is None
             ]
             summary_failures = [
                 {"event_id": item.event_id, "error": failure, "metrics": metrics}
-                for item, output, metrics, failure in summarized
+                for item, output, metrics, failure, _ in summarized
                 if failure is not None
             ]
             if artifact_journal:
                 artifact_journal.update("summary", {
                     "metrics": summary_metrics,
+                    "run_id": run_id,
+                    "editorial_trace": editorial_traces,
                     "successful_items": [{"event_id": value.item.event_id, "summary": value.summary.model_dump()} for value in email_items],
                     "failed_items": summary_failures,
                 }, run_status="partial" if summary_failures else "running")

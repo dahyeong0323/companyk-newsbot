@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from time import monotonic
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -108,27 +109,36 @@ class InsightGroundingVerifier:
         if not model.strip():
             raise ValueError("grounding verifier model must not be blank")
         self._client, self.model, self.reasoning_effort = client, model, reasoning_effort
+        self.last_trace: dict[str, object] | None = None
 
     def verify(self, event_payload: str, proposed: SummaryOutput) -> GroundingVerifierOutput:
+        request = {
+            "event": json.loads(event_payload),
+            "proposed_insight": {
+                "insight_one_liner": proposed.insight_one_liner,
+                "insight_dimension": proposed.insight_dimension,
+                "insight_mode": proposed.insight_mode,
+                "confidence": proposed.confidence,
+                "evidence_article_ids": proposed.evidence_article_ids,
+            },
+        }
         response = self._client.responses.parse(
             model=self.model,
             reasoning={"effort": self.reasoning_effort},
             text_format=GroundingVerifierOutput,
             input=[
                 {"role": "system", "content": GROUNDING_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps({
-                    "event": json.loads(event_payload),
-                    "proposed_insight": {
-                        "insight_one_liner": proposed.insight_one_liner,
-                        "insight_dimension": proposed.insight_dimension,
-                        "insight_mode": proposed.insight_mode,
-                        "confidence": proposed.confidence,
-                        "evidence_article_ids": proposed.evidence_article_ids,
-                    },
-                }, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
             ],
         )
         parsed = getattr(response, "output_parsed", None)
+        usage = getattr(response, "usage", None)
+        self.last_trace = {
+            "exact_input": request, "response_id": getattr(response, "id", None),
+            "raw_output": getattr(response, "output_text", None),
+            "parsed_output": parsed.model_dump() if hasattr(parsed, "model_dump") else None,
+            "token_usage": usage.model_dump() if hasattr(usage, "model_dump") else (dict(usage) if isinstance(usage, dict) else None),
+        }
         if not isinstance(parsed, GroundingVerifierOutput):
             raise SummaryError("grounding verifier returned malformed structured output")
         return parsed
@@ -141,22 +151,39 @@ class NewsSummarizer:
         self._client, self.model, self.reasoning_effort = client, model, reasoning_effort
         self.grounding_verifier = grounding_verifier
         self.metrics = SummaryMetrics()
+        # Kept in-memory only until the caller atomically journals it.  This is
+        # deliberately observational: it never changes the editor/verifier path.
+        self.forensic_trace: list[dict[str, object]] = []
 
     def summarize(self, item: RankedNewsItem) -> SummaryOutput:
         payload, valid_ids = self._payload(item)
-        parsed = self._validated_editor_result(item, payload, valid_ids)
-        parsed = self._verify_or_rewrite(item, payload, valid_ids, parsed)
-        if parsed.insight_mode == "implication":
-            self.metrics.implication_count += 1
-        else:
-            self.metrics.watchpoint_count += 1
-        return parsed
+        self.forensic_trace.append({"event": "editorial_begin", "event_id": item.event_id, "exact_editor_input": json.loads(payload)})
+        try:
+            parsed = self._validated_editor_result(item, payload, valid_ids)
+            parsed = self._verify_or_rewrite(item, payload, valid_ids, parsed)
+            if parsed.insight_mode == "implication":
+                self.metrics.implication_count += 1
+            else:
+                self.metrics.watchpoint_count += 1
+            self.forensic_trace.append({"event": "editorial_final", "event_id": item.event_id, "final_status": "success"})
+            return parsed
+        except Exception as exc:
+            self.forensic_trace.append({
+                "event": "editorial_final", "event_id": item.event_id, "final_status": "failed",
+                "final_failure_stage": self._failure_stage(exc), "exception_type": type(exc).__name__, "exception_message": str(exc),
+            })
+            raise
 
     def _validated_editor_result(self, item: RankedNewsItem, payload: str, valid_ids: set[str]) -> SummaryOutput:
         corrective = ""
         for attempt in range(2):
-            parsed = self._editor_call(payload + corrective)
+            parsed = self._editor_call(item.event_id, "editor_attempt_1" if attempt == 0 else "editor_attempt_2", payload + corrective)
             validation_error = self._validation_error(item, parsed, valid_ids)
+            self.forensic_trace.append({
+                "event": "evidence_validation", "event_id": item.event_id, "attempt": attempt + 1,
+                "passed": validation_error is None, "evidence_article_ids": parsed.evidence_article_ids,
+                "failure_reason": validation_error,
+            })
             if validation_error is None:
                 return parsed
             if attempt == 0:
@@ -171,8 +198,9 @@ class NewsSummarizer:
             raise SummaryError(f"summary validation failed after one retry: {validation_error}")
         raise AssertionError("unreachable")
 
-    def _editor_call(self, content: str) -> SummaryOutput:
+    def _editor_call(self, event_id: str, stage: str, content: str) -> SummaryOutput:
         self.metrics.calls += 1
+        started = monotonic()
         try:
             response = self._client.responses.parse(
                 model=self.model,
@@ -181,9 +209,11 @@ class NewsSummarizer:
                 reasoning={"effort": self.reasoning_effort},
             )
         except Exception as exc:
+            self.forensic_trace.append(self._call_trace(event_id, stage, self.model, started, content, None, exc))
             self.metrics.failures += 1
             raise SummaryError("final editor request or structured output failed safely") from exc
         parsed = getattr(response, "output_parsed", None)
+        self.forensic_trace.append(self._call_trace(event_id, stage, self.model, started, content, response, None, parsed))
         if not isinstance(parsed, SummaryOutput):
             self.metrics.failures += 1
             raise SummaryError("OpenAI response did not contain a parsed event summary")
@@ -193,7 +223,7 @@ class NewsSummarizer:
         if self.grounding_verifier is None:
             self.metrics.failures += 1
             raise SummaryError("final insight requires the Luna grounding verifier")
-        verdict = self._grounding_verdict(payload, proposed)
+        verdict = self._grounding_verdict(item.event_id, "grounding_verification", payload, proposed)
         if verdict.decision == "SUPPORTED":
             return proposed
         if proposed.insight_mode == "watchpoint":
@@ -206,27 +236,57 @@ class NewsSummarizer:
             "insight_mode=watchpoint. Identify a concrete observable variable or milestone using only supplied "
             "evidence. Do not return another implication and do not use generic filler."
         )
-        rewritten = self._editor_call(payload + rewrite_instruction)
+        rewritten = self._editor_call(item.event_id, "watchpoint_rewrite", payload + rewrite_instruction)
         error = self._validation_error(item, rewritten, valid_ids)
         if rewritten.insight_mode != "watchpoint":
             error = "unsupported implication rewrite must return watchpoint"
         if error is not None:
             self.metrics.failures += 1
             raise SummaryError(f"watchpoint rewrite failed validation: {error}")
-        rewrite_verdict = self._grounding_verdict(payload, rewritten)
+        rewrite_verdict = self._grounding_verdict(item.event_id, "watchpoint_grounding", payload, rewritten)
         if rewrite_verdict.decision != "SUPPORTED":
             self.metrics.failures += 1
             raise SummaryError("watchpoint rewrite failed grounding validation")
         return rewritten
 
-    def _grounding_verdict(self, payload: str, proposed: SummaryOutput) -> GroundingVerifierOutput:
+    def _grounding_verdict(self, event_id: str, stage: str, payload: str, proposed: SummaryOutput) -> GroundingVerifierOutput:
         self.metrics.grounding_calls += 1
+        started = monotonic()
         try:
-            return self.grounding_verifier.verify(payload, proposed)  # type: ignore[union-attr]
+            verdict = self.grounding_verifier.verify(payload, proposed)  # type: ignore[union-attr]
+            response_trace = getattr(self.grounding_verifier, "last_trace", None) or {}
+            self.forensic_trace.append({
+                "event": stage, "event_id": event_id, "model": getattr(self.grounding_verifier, "model", None),
+                "latency_ms": round((monotonic() - started) * 1000, 2), "decision": verdict.decision,
+                "unsupported_claims": verdict.unsupported_claims, "short_reason": verdict.short_reason, **response_trace,
+            })
+            return verdict
         except Exception as exc:
+            self.forensic_trace.append({"event": stage, "event_id": event_id, "latency_ms": round((monotonic() - started) * 1000, 2), "exception_type": type(exc).__name__, "exception_message": str(exc)})
             self.metrics.grounding_failures += 1
             self.metrics.failures += 1
             raise SummaryError("grounding verifier failed closed") from exc
+
+    @staticmethod
+    def _failure_stage(exc: Exception) -> str:
+        message = str(exc)
+        if "grounding" in message or "watchpoint" in message:
+            return "grounding_or_watchpoint"
+        if "validation" in message or "evidence" in message:
+            return "evidence_validation"
+        return "editor_client_or_schema"
+
+    @staticmethod
+    def _call_trace(event_id: str, stage: str, model: str, started: float, content: str, response: object | None, exc: Exception | None, parsed: object | None = None) -> dict[str, object]:
+        usage = getattr(response, "usage", None) if response is not None else None
+        usage_payload = usage.model_dump() if hasattr(usage, "model_dump") else (dict(usage) if isinstance(usage, dict) else None)
+        parsed_payload = parsed.model_dump() if hasattr(parsed, "model_dump") else None
+        return {
+            "event": stage, "event_id": event_id, "model": model, "latency_ms": round((monotonic() - started) * 1000, 2),
+            "exact_input": content, "response_id": getattr(response, "id", None), "raw_output": getattr(response, "output_text", None),
+            "parsed_output": parsed_payload, "token_usage": usage_payload,
+            "exception_type": type(exc).__name__ if exc else None, "exception_message": str(exc) if exc else None,
+        }
 
     @staticmethod
     def _validation_error(item: RankedNewsItem, parsed: SummaryOutput, valid_ids: set[str]) -> str | None:

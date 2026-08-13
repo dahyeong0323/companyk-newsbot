@@ -319,6 +319,9 @@ def test_full_shadow_summary_failure_persists_complete_partial_journal(monkeypat
     assert payload["run_status"] == "failed"
     assert payload["last_completed_stage"] == "summary"
     assert payload["failed_item_ids"]
-    assert {"collection", "qualification", "event_dedup", "ranking", "summary"}.issubset(payload["stages"])
+    assert {"collection", "qualification", "event_dedup", "ranking", "editorial_replay_bundle", "summary"}.issubset(payload["stages"])
+    bundle = payload["stages"]["editorial_replay_bundle"]
+    assert bundle["schema_version"] == "editorial_replay_bundle_v1"
+    assert bundle["events"][0]["exact_editor_input"]["event_id"]
     assert payload["stages"]["summary"]["successful_items"][0]["event_id"]
     assert payload["stages"]["summary"]["failed_items"][0]["event_id"]

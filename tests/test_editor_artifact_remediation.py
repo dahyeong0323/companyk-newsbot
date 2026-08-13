@@ -181,6 +181,23 @@ def test_watchpoint_fallback_is_concrete_and_prompted() -> None:
     assert "watchpoint" in system_prompt and "Never invent" in system_prompt
 
 
+def test_editorial_forensic_trace_records_exact_input_validation_and_final_status() -> None:
+    item = direct_item()
+    summarizer = NewsSummarizer(
+        SimpleNamespace(responses=SequentialResponses(output(item))),
+        model="editor-test",
+        grounding_verifier=SupportedVerifier(),
+    )
+    summarizer.summarize(item)
+    trace = summarizer.forensic_trace
+    assert trace[0]["event"] == "editorial_begin"
+    assert trace[0]["exact_editor_input"]["event_id"] == item.event_id
+    assert any(value["event"] == "editor_attempt_1" and value["parsed_output"] for value in trace)
+    assert any(value["event"] == "evidence_validation" and value["passed"] is True for value in trace)
+    assert any(value["event"] == "grounding_verification" and value["decision"] == "SUPPORTED" for value in trace)
+    assert trace[-1] == {"event": "editorial_final", "event_id": item.event_id, "final_status": "success"}
+
+
 def test_html_renders_insight_coverage_representative_url_and_multi_company_label() -> None:
     item = external_item()
     rendered = HtmlEmailRenderer().render([EmailNewsItem(item, output(item))], report_date=date(2026, 8, 12))
