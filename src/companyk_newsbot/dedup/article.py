@@ -60,6 +60,7 @@ class ArticleDeduplicator:
 
             groups.setdefault(primary_index, []).append(article)
             reasons.setdefault(primary_index, reason)
+            retained[primary_index] = self._merge_provenance(retained[primary_index], article)
 
         return ArticleDeduplicationResult(
             articles=tuple(retained),
@@ -70,3 +71,25 @@ class ArticleDeduplicator:
                 for index, duplicates in groups.items()
             ),
         )
+
+    @staticmethod
+    def _merge_provenance(primary: Article, duplicate: Article) -> Article:
+        """Union query/company provenance while keeping the first article's public semantics."""
+        metadata = dict(primary.origin_metadata)
+        queries: list[str] = []
+        company_ids: list[str] = []
+        for article in (primary, duplicate):
+            query = article.origin_metadata.get("query")
+            if isinstance(query, str) and query.strip():
+                queries.append(query)
+            origin_queries = article.origin_metadata.get("origin_queries", [])
+            if isinstance(origin_queries, list):
+                queries.extend(str(value) for value in origin_queries if str(value).strip())
+            candidates = article.origin_metadata.get("candidate_company_ids", [])
+            if isinstance(candidates, list):
+                company_ids.extend(str(value) for value in candidates if str(value).strip())
+        if queries:
+            metadata["origin_queries"] = list(dict.fromkeys(queries))
+        if company_ids:
+            metadata["candidate_company_ids"] = list(dict.fromkeys(company_ids))
+        return primary.model_copy(update={"origin_metadata": metadata}) if metadata != primary.origin_metadata else primary

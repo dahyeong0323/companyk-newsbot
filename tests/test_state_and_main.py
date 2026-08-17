@@ -51,11 +51,54 @@ def test_main_records_shadow_run_without_sending(monkeypatch, tmp_path) -> None:
     assert JsonStateStore(tmp_path).load().run_ledger[-1]["phase"] == "pre_delivery_validation"
 
 
-def test_main_blocks_live_mode(monkeypatch, tmp_path) -> None:
+def test_main_live_requires_explicit_enablement(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("RUN_MODE", "live")
     monkeypatch.setenv("STATE_DIR", str(tmp_path))
-    with pytest.raises(RuntimeError, match="live mode is blocked"):
+    with pytest.raises(RuntimeError, match="PRODUCTION_EMAIL_ENABLED"):
         main.main()
+
+
+def test_main_live_schedule_guard_never_invokes_delivery(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("RUN_MODE", "live")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PRODUCTION_EMAIL_ENABLED", "true")
+    monkeypatch.setattr(main, "_production_schedule_window_is_open", lambda: False)
+    monkeypatch.setattr(main, "run_real_e2e", lambda *args, **kwargs: pytest.fail("delivery must not run"))
+    assert main.main() == 0
+    assert JsonStateStore(tmp_path).load().run_ledger[-1]["phase"] == "production_schedule_guard"
+
+
+def test_main_live_advances_delivery_checkpoint_only_after_delivery(monkeypatch, tmp_path) -> None:
+    observed = {}
+
+    def fake_run(config, store, **kwargs):
+        observed.update(kwargs)
+        return SimpleNamespace(status="success", delivery_id="production-delivery", log_payload=lambda: {"final_items": 1})
+
+    monkeypatch.setenv("RUN_MODE", "live")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PRODUCTION_EMAIL_ENABLED", "true")
+    monkeypatch.setattr(main, "_production_schedule_window_is_open", lambda: True)
+    monkeypatch.setattr(main, "run_real_e2e", fake_run)
+    assert main.main() == 0
+    assert observed == {"profile": "production", "deliver": True}
+    state = JsonStateStore(tmp_path).load()
+    assert state.run_ledger[-1]["phase"] == "production_delivery"
+    assert state.last_successful_delivery_run is not None
+
+
+def test_main_live_inconclusive_keeps_delivery_checkpoint_unchanged(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("RUN_MODE", "live")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PRODUCTION_EMAIL_ENABLED", "true")
+    monkeypatch.setattr(main, "_production_schedule_window_is_open", lambda: True)
+    monkeypatch.setattr(
+        main,
+        "run_real_e2e",
+        lambda *args, **kwargs: SimpleNamespace(status="inconclusive", delivery_id=None, log_payload=lambda: {"final_items": 0}),
+    )
+    assert main.main() == 2
+    assert JsonStateStore(tmp_path).load().last_successful_delivery_run is None
 
 
 def test_main_full_shadow_uses_full_coverage_without_delivery(monkeypatch, tmp_path) -> None:
@@ -89,4 +132,26 @@ def test_main_records_inconclusive_smoke_without_checkpoint(monkeypatch, tmp_pat
     assert main.main() == 2
     state = JsonStateStore(tmp_path).load()
     assert state.run_ledger[-1]["status"] == "inconclusive"
+    assert state.last_successful_delivery_run is None
+
+
+def test_main_records_inconclusive_full_shadow_without_shadow_checkpoint(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("RUN_MODE", "full_shadow")
+    monkeypatch.setenv("SHADOW_TEST_EMAIL", "true")
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        main,
+        "run_real_e2e",
+        lambda *args, **kwargs: SimpleNamespace(
+            status="inconclusive",
+            delivery_id=None,
+            production_delivery_checkpoint_before=None,
+            log_payload=lambda: {"status": "inconclusive", "collection_coverage_status": "INCONCLUSIVE"},
+        ),
+    )
+
+    assert main.main() == 2
+    state = JsonStateStore(tmp_path).load()
+    assert state.run_ledger[-1]["phase"] == "full_shadow_inconclusive"
+    assert state.last_shadow_run is None
     assert state.last_successful_delivery_run is None

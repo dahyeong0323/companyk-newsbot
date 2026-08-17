@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from datetime import UTC, datetime
 import gzip
 import hashlib
 import json
@@ -10,26 +11,61 @@ from types import SimpleNamespace
 
 import pytest
 
-from companyk_newsbot.judges import CascadeSettings, LunaJudgeOutput, RouteBCascadeJudge
 from companyk_newsbot.editorial_replay import load_editorial_replay_bundle
-from companyk_newsbot.replay import run_replay
+from companyk_newsbot.judges import CascadeSettings, NanoJudgeOutput, RouteBCascadeJudge
+from companyk_newsbot.replay import ReplayError, run_replay
 
 
 class Responses:
     async def parse(self, **_kwargs):
-        return SimpleNamespace(output_parsed=LunaJudgeOutput(decision="ACCEPT", reason_code="none", short_reason="clear", confidence="high", event_family="policy", materiality="high", impact_direction="negative", causal_mechanism="causal"), usage=None)
+        return SimpleNamespace(
+            output_parsed=NanoJudgeOutput(decision="ACCEPT", reason_code="MATERIAL_LINK|policy|high|negative"),
+            usage=None,
+        )
 
 
 class Client:
     responses = Responses()
 
 
-def test_replay_compares_luna_to_stored_sol_without_sol_calls(tmp_path: Path) -> None:
-    artifact = {"debug":{"route_b":{"judgments":[{"company":"Example Co","article":{"title":"Article","source":"Source","url":"https://example.com","published_at":"2026-08-12T00:00:00+00:00"},"exposure":{"exposure_id":"example","subject":"Example","allowed_event_families":["policy"]},"judge":{"qualifies":False}}]}}}
-    source = tmp_path / "baseline.json"; source.write_text(json.dumps(artifact), encoding="utf-8")
-    client = Client(); cascade = RouteBCascadeJudge(client, client, CascadeSettings(luna_rpm_budget=1000, sol_rpm_budget=1000))
+def judgment(*, exact: bool = True) -> dict:
+    article = {
+        "title": "Article", "source": "Source", "url": "https://example.com",
+        "published_at": "2026-08-12T00:00:00+00:00",
+    }
+    if exact:
+        article.update({
+            "source_type": "google_news_rss", "retrieved_at": datetime.now(UTC).isoformat(),
+            "description": "A policy event", "text": "Policy text", "origin_metadata": {"query": "policy"},
+        })
+    return {
+        "company": "Example Co", "article": article,
+        "exposure": {"exposure_id": "example", "subject": "Example", "allowed_event_families": ["policy"]},
+        "judge": {"qualifies": False, "audit": {"final_decision": "REJECT"}},
+    }
+
+
+def test_replay_compares_new_final_path_to_frozen_final_decision(tmp_path: Path) -> None:
+    artifact = {"debug": {"route_b": {"judgments": [judgment()]}}}
+    source = tmp_path / "baseline.json"
+    source.write_text(json.dumps(artifact), encoding="utf-8")
+    client = Client()
+    cascade = RouteBCascadeJudge(
+        client, client,
+        CascadeSettings(nano_rpm_budget=1000, luna_rpm_budget=1000),
+    )
     report = asyncio.run(run_replay(source, judge=cascade))
-    assert report["old_sol_rejects_accepted_by_luna"]
+    assert report["TOTAL CANDIDATES"] == 1
+    assert report["OLD REJECT -> NEW ACCEPT"] == 1
+    assert report["BASELINE ACCEPT LOST"] == 0
+
+
+def test_replay_refuses_incomplete_historical_classifier_input(tmp_path: Path) -> None:
+    artifact = {"debug": {"route_b": {"judgments": [judgment(exact=False)]}}}
+    source = tmp_path / "baseline.json"
+    source.write_text(json.dumps(artifact), encoding="utf-8")
+    with pytest.raises(ReplayError, match="exact classifier input is unrecoverable"):
+        asyncio.run(run_replay(source))
 
 
 @pytest.mark.parametrize("encoding", ["utf-8", "utf-16"])

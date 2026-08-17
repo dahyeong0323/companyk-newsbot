@@ -7,7 +7,10 @@ from companyk_newsbot import e2e
 from companyk_newsbot.collectors.google_news_rss import QueryCollectionResult, RSSCollectionResult
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.judges import SummaryOutput
+from companyk_newsbot.judges.direct_event import DirectEventAssessment, DirectGroundingVerdict, UsageMetrics
+from companyk_newsbot.email import ResendSettings
 from companyk_newsbot.models import Article
+from companyk_newsbot.portfolio_registry import PortfolioRegistry
 from companyk_newsbot.state import JsonStateStore
 
 
@@ -78,9 +81,11 @@ class FakeJudge:
 
 
 def configure_safe_environment(monkeypatch) -> None:
+    monkeypatch.setenv("ROUTE_B_ENABLED", "true")
     monkeypatch.setenv("RESEND_API_KEY", "test-secret")
     monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENT)
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-secret")
+    monkeypatch.setenv("NEWSBOT_COST_FIRST_PIPELINE", "false")
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FakeCollector)
     monkeypatch.setattr(e2e, "RouteBCausalMaterialityJudge", FakeJudge)
 
@@ -144,7 +149,7 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
     assert result.summary_calls == 1
     assert result.delivery_id == "delivery-test-id"
     assert recipients == [e2e.TEST_RECIPIENT]
-    assert summary_settings == [("gpt-5.6-sol", "medium")]
+    assert summary_settings == [("gpt-5.6-luna", "low")]
 
 def test_editorial_trace_log_preserves_nested_event_without_collision(monkeypatch) -> None:
     import companyk_newsbot.e2e as e2e
@@ -155,3 +160,155 @@ def test_editorial_trace_log_preserves_nested_event_without_collision(monkeypatc
     e2e._emit_editorial_traces("run-1", [original])
     assert emitted == [("editorial_trace", {"run_id": "run-1", "trace_event": "grounding_verification", "event_id": "event-1"})]
     assert original["event"] == "grounding_verification"
+
+
+def test_shadow_delivery_guard_allows_only_fixed_test_recipient() -> None:
+    e2e._assert_test_recipient(ResendSettings("key", e2e.TEST_RECIPIENT, "sender@example.com"))
+    import pytest
+    with pytest.raises(e2e.E2EExecutionError, match=e2e.TEST_RECIPIENT):
+        e2e._assert_test_recipient(ResendSettings("key", "production@example.com", "sender@example.com"))
+
+
+def test_default_route_a_only_never_constructs_or_calls_route_b(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ROUTE_B_ENABLED", "false")
+    monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FakeCollector)
+    FakeCollector.articles = (article(),)
+
+    class FakeDirectJudge:
+        def __init__(self):
+            self.model = "gpt-5.6-luna"
+            self.metrics = UsageMetrics()
+
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+        def assess(self, event):
+            from companyk_newsbot.dedup import article_id
+            self.metrics.calls += 1
+            return DirectEventAssessment(
+                decision="DELIVER", reason_code="funding", materiality="high", event_family="financing",
+                fact_summary="Direct Co가 신규 투자를 유치했습니다.", investor_insight=None,
+                evidence_article_ids=[article_id(event.primary.article)],
+            )
+
+    class FakeDirectGrounder:
+        def __init__(self):
+            self.metrics = UsageMetrics()
+
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+        def ground(self, event, assessment):
+            self.metrics.calls += 1
+            verdict = DirectGroundingVerdict(
+                fact_summary="SUPPORTED", investor_insight="NOT_PRESENT", unsupported_claims=[]
+            )
+            return assessment.fact_summary, None, verdict
+
+    class ForbiddenRouteB:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Route B was constructed in the default path")
+
+    monkeypatch.setattr(e2e, "DirectEventJudge", FakeDirectJudge)
+    monkeypatch.setattr(e2e, "DirectEventGrounder", FakeDirectGrounder)
+    monkeypatch.setattr(e2e, "RouteBCandidateGenerator", ForbiddenRouteB)
+
+    result = e2e.run_real_e2e(
+        PortfolioRegistry.from_legacy(config()),
+        JsonStateStore(tmp_path),
+        now=NOW,
+        deliver=False,
+    )
+
+    assert result.status == "success"
+    assert result.route_b_candidates == result.route_b_accepted == result.route_b_rejected == 0
+    assert result.cascade_metrics["route_b_calls"] == 0
+    assert result.cascade_metrics["article_level_ai_calls"] == 0
+    assert result.cascade_metrics["production_sol_calls"] == 0
+    assert result.cascade_metrics["enrichment_skipped_identity_already_visible"] == 1
+    assert result.cascade_metrics["enrichment_attempted"] == 0
+    assert result.judge_calls == 1
+    assert result.cascade_metrics["direct_grounding_calls"] == 1
+
+
+def test_insufficient_collection_is_inconclusive_and_never_sends_normal_shadow(monkeypatch, tmp_path) -> None:
+    class FailedCollector(FakeCollector):
+        async def collect_many(self, queries):
+            values = tuple(queries)
+            return RSSCollectionResult(tuple(
+                QueryCollectionResult(query, "service_unavailable", error="503", attempts=3, retry_attempts=2, http_status=503)
+                for query in values
+            ), systemic_breaker_triggered=True)
+
+    sent = []
+    store = JsonStateStore(tmp_path / "state")
+    store.mark_sent("existing", kind="event")
+    before = store.load()
+    monkeypatch.setenv("ROUTE_B_ENABLED", "false")
+    monkeypatch.setenv("RSS_MIN_SUCCESS_RATIO", "0.90")
+    monkeypatch.setenv("RESEND_API_KEY", "test-secret")
+    monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENT)
+    monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FailedCollector)
+    monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))
+
+    result = e2e.run_real_e2e(
+        PortfolioRegistry.from_legacy(config()), store, now=NOW, profile="full_shadow", deliver=True,
+    )
+
+    after = store.load()
+    assert result.status == "inconclusive"
+    assert result.delivery_id is None
+    assert result.final_items == 0
+    assert result.cascade_metrics["collection_coverage_status"] == "INCONCLUSIVE"
+    assert result.cascade_metrics["direct_assessment_calls"] == 0
+    assert result.cascade_metrics["direct_grounding_calls"] == 0
+    assert sent == []
+    assert after.sent_event_fingerprints == before.sent_event_fingerprints == ["existing"]
+    assert after.last_successful_delivery_run == before.last_successful_delivery_run is None
+    artifact = __import__("json").loads(__import__("pathlib").Path(result.artifact_json_path).read_text(encoding="utf-8"))
+    assert artifact["run_status"] == "inconclusive"
+    assert artifact["fatal_error"] == "collection_coverage_below_threshold"
+    assert artifact["debug"]["safety"]["shadow_test_email_sent"] is False
+    assert artifact["user_facing"]["email_subject"].startswith("[SHADOW][수집 실패]")
+
+
+def test_sufficient_collection_with_zero_events_is_valid_empty_shadow(monkeypatch, tmp_path) -> None:
+    class EmptyJudge:
+        model = "gpt-5.6-luna"
+        metrics = UsageMetrics()
+
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+    class EmptyGrounder:
+        metrics = UsageMetrics()
+
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+    monkeypatch.setenv("ROUTE_B_ENABLED", "false")
+    monkeypatch.setenv("RSS_MIN_SUCCESS_RATIO", "0.90")
+    monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FakeCollector)
+    monkeypatch.setattr(e2e, "DirectEventJudge", EmptyJudge)
+    monkeypatch.setattr(e2e, "DirectEventGrounder", EmptyGrounder)
+    FakeCollector.articles = ()
+
+    result = e2e.run_real_e2e(
+        PortfolioRegistry.from_legacy(config()), JsonStateStore(tmp_path / "state"),
+        now=NOW, profile="full_shadow", deliver=False,
+    )
+
+    assert result.status == "success"
+    assert result.collection_successes == 1
+    assert result.final_items == 0
+    assert result.cascade_metrics["collection_coverage_status"] == "SUFFICIENT"
+    artifact = __import__("json").loads(__import__("pathlib").Path(result.artifact_json_path).read_text(encoding="utf-8"))
+    assert artifact["run_status"] == "success"
+    assert artifact["user_facing"]["email_subject"].startswith("[SHADOW]")
+    assert "[수집 실패]" not in artifact["user_facing"]["email_subject"]

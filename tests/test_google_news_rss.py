@@ -19,12 +19,18 @@ RSS_BODY = b"""<?xml version="1.0" encoding="UTF-8"?>
 </channel></rss>"""
 
 
+async def no_sleep(_: float) -> None:
+    return None
+
+
 def collector_for(body: bytes, status_code: int = 200) -> GoogleNewsRSSCollector:
     transport = httpx.MockTransport(lambda request: httpx.Response(status_code, content=body, request=request))
     client = httpx.AsyncClient(transport=transport)
     return GoogleNewsRSSCollector(
         client=client,
         now=lambda: datetime(2026, 8, 12, 7, 0, tzinfo=UTC),
+        sleep=no_sleep,
+        random_value=lambda: 0.5,
     )
 
 
@@ -38,6 +44,8 @@ def test_collects_and_normalizes_google_news_items() -> None:
     assert article.description == "Funding & expansion announced."
     assert article.published_at == datetime(2026, 8, 11, 8, 0, tzinfo=UTC)
     assert article.origin_metadata["query"] == "Example Co funding"
+    assert article.origin_metadata["origin_queries"] == ["Example Co funding"]
+    assert article.origin_metadata["google_news_url"] == "https://news.example.com/story?utm_source=google&id=42#section"
     assert article.retrieved_at == datetime(2026, 8, 12, 7, 0, tzinfo=UTC)
 
 
@@ -117,14 +125,14 @@ def test_collect_many_isolates_timeout_http_and_parse_failures() -> None:
 
     async def run():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        collector = GoogleNewsRSSCollector(client=client)
+        collector = GoogleNewsRSSCollector(client=client, sleep=no_sleep, random_value=lambda: 0.5)
         try:
             return await collector.collect_many(["success", "timeout", "http", "parse"])
         finally:
             await client.aclose()
 
     result = asyncio.run(run())
-    assert [item.status for item in result.queries] == ["success", "timeout", "http_error", "parse_error"]
+    assert [item.status for item in result.queries] == ["success", "timeout", "service_unavailable", "parse_error"]
     assert len(result.articles) == 1
     assert len(result.successes) == 1
     assert len(result.failures) == 3
@@ -145,7 +153,7 @@ def test_connection_failure_is_retried_once_then_succeeds(failure_type: str) -> 
 
     async def run():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        collector = GoogleNewsRSSCollector(client=client)
+        collector = GoogleNewsRSSCollector(client=client, sleep=no_sleep)
         try:
             return await collector.collect_many(["retry succeeds"])
         finally:
@@ -157,22 +165,20 @@ def test_connection_failure_is_retried_once_then_succeeds(failure_type: str) -> 
     assert len(result.articles) == 1
 
 
-@pytest.mark.parametrize("failure_type", ["read_timeout", "http_status", "parse_error"])
-def test_non_connection_failures_are_not_retried(failure_type: str) -> None:
+@pytest.mark.parametrize("failure_type", ["http_404", "parse_error"])
+def test_non_transient_failures_are_not_retried(failure_type: str) -> None:
     attempts = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
         attempts += 1
-        if failure_type == "read_timeout":
-            raise httpx.ReadTimeout("read timed out", request=request)
-        if failure_type == "http_status":
-            return httpx.Response(429, request=request)
+        if failure_type == "http_404":
+            return httpx.Response(404, request=request)
         return httpx.Response(200, content=b"not an rss feed", request=request)
 
     async def run():
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        collector = GoogleNewsRSSCollector(client=client)
+        collector = GoogleNewsRSSCollector(client=client, sleep=no_sleep)
         try:
             return await collector.collect_many(["no retry"])
         finally:
@@ -220,7 +226,7 @@ def test_global_deadline_cancels_unfinished_work_and_preserves_successes() -> No
 
     result = asyncio.run(run())
     assert result.queries[0].status == "success"
-    assert [item.status for item in result.queries[1:]] == ["timeout", "timeout"]
+    assert [item.status for item in result.queries[1:]] == ["collection_deadline", "collection_deadline"]
     assert len(result.articles) == 1
 
 
@@ -244,3 +250,224 @@ def test_duplicate_normalized_queries_are_fetched_once() -> None:
     assert calls == 1
     assert len(result.queries) == 1
     assert len(result.articles) == 1
+
+
+@pytest.mark.parametrize("failures_before_success", [1, 2])
+def test_503_retries_then_succeeds(failures_before_success: int) -> None:
+    attempts = 0
+    delays = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= failures_before_success:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, sleep=sleep, random_value=lambda: 0.5)
+        try:
+            return await collector.collect_many(["retry"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert attempts == failures_before_success + 1
+    assert result.queries[0].status == "success"
+    assert result.queries[0].retry_attempts == failures_before_success
+    assert delays == [0.5, 1.0][:failures_before_success]
+
+
+def test_repeated_503_stops_after_two_retries() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(503, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, sleep=no_sleep)
+        try:
+            return await collector.collect_many(["bounded"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert attempts == 3
+    assert result.queries[0].status == "service_unavailable"
+    assert result.metrics()["rss_503"] == 1
+    assert result.metrics()["rss_retry_attempts"] == 2
+
+
+def test_429_retry_after_is_bounded_and_recorded() -> None:
+    attempts = 0
+    delays = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "99"}, request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, sleep=sleep)
+        try:
+            return await collector.collect_many(["limited"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert delays == [5.0]
+    assert result.queries[0].retry_after_used == 1
+    assert result.metrics()["rss_retry_after_used"] == 1
+
+
+def test_429_without_retry_after_uses_deterministic_backoff() -> None:
+    attempts = 0
+    delays = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def sleep(delay: float) -> None:
+        delays.append(delay)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, sleep=sleep, random_value=lambda: 0.5)
+        try:
+            return await collector.collect_many(["limited"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert result.queries[0].status == "success"
+    assert delays == [0.5]
+
+
+@pytest.mark.parametrize("failures_before_success, expected_status", [(1, "success"), (3, "timeout")])
+def test_read_timeout_retry_is_bounded(failures_before_success: int, expected_status: str) -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= failures_before_success:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, sleep=no_sleep)
+        try:
+            return await collector.collect_many(["timeout"])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert result.queries[0].status == expected_status
+    assert attempts == (2 if expected_status == "success" else 3)
+
+
+def test_systemic_breaker_stops_hammering_and_accounts_for_skips() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        settings = RSSCollectorSettings(max_retries=0, breaker_cooldown_seconds=0)
+        collector = GoogleNewsRSSCollector(client=client, settings=settings, sleep=no_sleep)
+        try:
+            return await collector.collect_many([f"q{i}" for i in range(20)])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert calls == 8
+    assert len(result.queries) == 20
+    assert result.systemic_breaker_triggered is True
+    assert result.metrics()["rss_skipped_systemic_failure"] == 12
+
+
+def test_isolated_transient_failures_do_not_trip_breaker() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params["q"]
+        if query in {"q0", "q1"}:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        settings = RSSCollectorSettings(max_retries=0, breaker_cooldown_seconds=0)
+        collector = GoogleNewsRSSCollector(client=client, settings=settings, sleep=no_sleep)
+        try:
+            return await collector.collect_many([f"q{i}" for i in range(12)])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert result.systemic_breaker_triggered is False
+    assert result.metrics()["rss_query_success"] == 10
+    assert result.metrics()["rss_skipped_systemic_failure"] == 0
+
+
+def test_breaker_serial_probe_recovers_and_finishes_queue() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        index = int(request.url.params["q"][1:])
+        if index < 6:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        settings = RSSCollectorSettings(max_retries=0, breaker_cooldown_seconds=0)
+        collector = GoogleNewsRSSCollector(client=client, settings=settings, sleep=no_sleep)
+        try:
+            return await collector.collect_many([f"q{i}" for i in range(12)])
+        finally:
+            await client.aclose()
+
+    result = asyncio.run(run())
+    assert result.systemic_breaker_triggered is True
+    assert result.metrics()["rss_query_success"] == 6
+    assert result.metrics()["rss_skipped_systemic_failure"] == 0
+
+
+def test_collector_sends_stable_request_headers() -> None:
+    observed = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(request.headers)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            await collector.collect("headers")
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+    assert observed["user-agent"].startswith("CompanyK-Newsbot/")
+    assert "application/rss+xml" in observed["accept"]
+    assert observed["accept-language"].startswith("en-US")

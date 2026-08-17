@@ -338,6 +338,8 @@ def test_full_shadow_artifact_preflight_fails_before_collector_or_llm(monkeypatc
 
 
 def test_full_shadow_summary_failure_persists_complete_partial_journal(monkeypatch, tmp_path) -> None:
+    # This fixture exercises the preserved legacy Route B/editorial path.
+    monkeypatch.setenv("ROUTE_B_ENABLED", "true")
     artifact_dir = tmp_path / "persistent-artifacts"
     monkeypatch.setenv("ARTIFACT_DIR", str(artifact_dir.resolve()))
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda **kwargs: SimpleNamespace()))

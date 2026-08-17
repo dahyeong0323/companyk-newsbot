@@ -1,0 +1,22 @@
+{
+  "deliver": [
+    {"category": "funding announcement", "materiality": "high", "event_family": "financing"},
+    {"category": "M&A", "materiality": "high", "event_family": "m_and_a"},
+    {"category": "major customer contract", "materiality": "high", "event_family": "commercial_contract"},
+    {"category": "clinical/regulatory milestone", "materiality": "high", "event_family": "clinical_regulatory"},
+    {"category": "material product launch", "materiality": "medium", "event_family": "product_launch"},
+    {"category": "major capacity expansion", "materiality": "high", "event_family": "capacity_expansion"},
+    {"category": "CEO/founder transition", "materiality": "medium", "event_family": "leadership"},
+    {"category": "material legal event", "materiality": "high", "event_family": "legal"}
+  ],
+  "ignore": [
+    {"category": "conference attendance", "reason_code": "conference_attendance"},
+    {"category": "award with no business event", "reason_code": "non_material_award"},
+    {"category": "passing mention", "reason_code": "passing_mention"},
+    {"category": "historical roundup", "reason_code": "historical_roundup"},
+    {"category": "generic interview", "reason_code": "generic_interview"},
+    {"category": "minor promotional product mention", "reason_code": "minor_promotion"},
+    {"category": "wrong entity", "reason_code": "wrong_entity"},
+    {"category": "stale rehash", "reason_code": "stale_rehash"}
+  ]
+}

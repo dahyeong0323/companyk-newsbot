@@ -1,4 +1,4 @@
-"""Deterministic ordering and daily limits for qualified news items."""
+"""Deterministic ordering for qualified news items, with optional legacy limits."""
 
 from __future__ import annotations
 
@@ -85,11 +85,13 @@ class RankedNewsItem:
 
 
 class NewsRanker:
-    """Apply a visible priority order without hiding any threshold in routing code."""
+    """Order qualified items; optional limits exist only for explicit legacy callers."""
 
-    def __init__(self, *, total_max_items: int = 12, max_items_per_company: int = 2) -> None:
-        if total_max_items < 1 or max_items_per_company < 1:
-            raise ValueError("ranking limits must be positive")
+    def __init__(self, *, total_max_items: int | None = None, max_items_per_company: int | None = None) -> None:
+        if total_max_items is not None and total_max_items < 1:
+            raise ValueError("total ranking limit must be positive when set")
+        if max_items_per_company is not None and max_items_per_company < 1:
+            raise ValueError("per-company ranking limit must be positive when set")
         self.total_max_items = total_max_items
         self.max_items_per_company = max_items_per_company
 
@@ -99,12 +101,14 @@ class NewsRanker:
         selected: list[RankedNewsItem] = []
         for item in ordered:
             companies = item.impacted_companies or (item.company,)
-            if any(per_company.get(company, 0) >= self.max_items_per_company for company in companies):
+            if self.max_items_per_company is not None and any(
+                per_company.get(company, 0) >= self.max_items_per_company for company in companies
+            ):
                 continue
             selected.append(item)
             for company in companies:
                 per_company[company] = per_company.get(company, 0) + 1
-            if len(selected) == self.total_max_items:
+            if self.total_max_items is not None and len(selected) == self.total_max_items:
                 break
         return selected
 

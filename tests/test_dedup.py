@@ -44,6 +44,19 @@ def test_article_dedup_collapses_identical_normalized_titles_from_different_feed
     assert result.duplicate_groups[0].reason == "normalized_title"
 
 
+def test_article_dedup_preserves_all_query_and_company_provenance() -> None:
+    first = article("Shared event", "https://example.com/shared").model_copy(update={
+        "origin_metadata": {"query": "AlphaBio", "origin_queries": ["AlphaBio"], "candidate_company_ids": ["company-alpha"]}
+    })
+    second = article("Shared event syndicated", "https://example.com/shared").model_copy(update={
+        "origin_metadata": {"query": "BetaTech", "origin_queries": ["BetaTech"], "candidate_company_ids": ["company-beta"]}
+    })
+    result = ArticleDeduplicator().deduplicate([first, second])
+    metadata = result.articles[0].origin_metadata
+    assert metadata["origin_queries"] == ["AlphaBio", "BetaTech"]
+    assert metadata["candidate_company_ids"] == ["company-alpha", "company-beta"]
+
+
 def test_event_cluster_groups_same_company_cross_publication_coverage() -> None:
     early = match(
         "Alpha Ventures",

@@ -23,8 +23,8 @@ class EmailNewsItem:
             raise ValueError("external email items require why_it_matters")
         if self.item.route == "direct" and self.summary.why_it_matters:
             raise ValueError("direct email items must not include why_it_matters")
-        if not self.summary.insight_one_liner:
-            raise ValueError("email items require a grounded executive insight")
+        if self.item.route == "external" and not self.summary.insight_one_liner:
+            raise ValueError("external email items require a grounded executive insight")
 
 
 @dataclass(frozen=True)
@@ -36,19 +36,18 @@ class RenderedEmail:
 class HtmlEmailRenderer:
     """A dependency-light, email-client-safe renderer. Sending belongs to a later step."""
 
-    def render(self, items: Iterable[EmailNewsItem], *, report_date: date) -> RenderedEmail:
+    def render(self, items: Iterable[EmailNewsItem], *, report_date: date, route_b_enabled: bool = True) -> RenderedEmail:
         all_items = list(items)
         direct = [item for item in all_items if item.item.route == "direct"]
         external = [item for item in all_items if item.item.route == "external"]
-        subject = f"[Company K] 포트폴리오 데일리 뉴스 | {report_date.isoformat()}"
-        body = "".join(
-            [
-                self._header(report_date, len(all_items)),
-                self._section("1. 기업 직접 뉴스", direct, external=False),
-                self._section("2. 포트폴리오 영향 뉴스", external, external=True),
-                "</td></tr></table></body></html>",
-            ]
-        )
+        subject = f"[Company K] 포트폴리오 데일리 뉴스 | {report_date.isoformat()} | 주요 뉴스 {len(all_items)}건"
+        if route_b_enabled:
+            content = self._section("1. 기업 직접 뉴스", direct, external=False) + self._section("2. 포트폴리오 영향 뉴스", external, external=True)
+        elif direct:
+            content = "".join(self._item(item, external=False) for item in direct)
+        else:
+            content = '<p style="margin:28px 0;color:#34445e;font-size:15px">오늘 컴퍼니케이파트너스 포트폴리오 회사의 주요 기사는 없습니다.</p>'
+        body = self._header(report_date, len(all_items)) + content + "</td></tr></table></body></html>"
         return RenderedEmail(subject=subject, html=body)
 
     @staticmethod
@@ -77,7 +76,7 @@ class HtmlEmailRenderer:
         if item.coverage_count > 1:
             coverage += f" · 외 {item.coverage_count - 1}개 매체 보도"
         company_label = "영향" if item.route == "external" and len(item.impacted_companies) > 1 else "회사"
-        insight = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>투자자 관점:</strong> {escape(summary.insight_one_liner or '')}</p>"
+        insight = "" if not summary.insight_one_liner else f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>투자자 관점:</strong> {escape(summary.insight_one_liner)}</p>"
         why = ""
         if external:
             why = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>왜 이 회사에 중요한가:</strong> {escape(summary.why_it_matters or '')}</p>"

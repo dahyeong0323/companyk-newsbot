@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -241,3 +242,29 @@ def test_full_shadow_artifact_serializes_event_editor_and_dedup_audit(tmp_path) 
     assert final[1]["impacted_companies"] == ["A", "B"]
     assert payload["debug"]["metrics"]["luna_event_dedup_failures"] == 1
     assert open(html_path, encoding="utf-8").read() == rendered.html
+
+
+def test_full_shadow_artifact_distinguishes_shadow_test_delivery_from_production(tmp_path) -> None:
+    direct = direct_item()
+    email_items = [EmailNewsItem(direct, output(direct))]
+    rendered = HtmlEmailRenderer().render(email_items, report_date=date(2026, 8, 12))
+    json_path, _ = write_full_shadow_artifacts(
+        artifact_dir=tmp_path,
+        run_time=NOW,
+        metrics={"production_sol_calls": 0},
+        delivery_checkpoint_before="2026-08-10T00:00:00+00:00",
+        rendered=rendered,
+        email_items=email_items,
+        route_a_events=[direct.direct_event],
+        route_b_events=[],
+        judged=[],
+        prefilter_rejections=[],
+        shadow_delivery_id="shadow-delivery-id",
+    )
+    safety = json.loads(Path(json_path).read_text(encoding="utf-8"))["debug"]["safety"]
+    assert safety["production_email_sent"] is False
+    assert safety["delivered"] is False
+    assert safety["production_delivery_checkpoint_advanced_by_run"] is False
+    assert safety["shadow_test_email_sent"] is True
+    assert safety["shadow_test_delivery_id"] == "shadow-delivery-id"
+    assert safety["resend_called"] is True

@@ -46,7 +46,7 @@ def load_editorial_replay_bundle(path: Path) -> dict[str, Any]:
 
 
 def run_editorial_replay(bundle: dict[str, Any], *, client: Any, summary_model: str, summary_reasoning: str, grounding_model: str, grounding_reasoning: str, concurrency: int = 4) -> dict[str, Any]:
-    """Run Sol editor and Luna grounding only; no RSS, routing, ranking, state, or delivery."""
+    """Run Luna editor and Luna grounding only; no RSS, routing, ranking, state, or delivery."""
     events = bundle["events"]
     if not events:
         raise EditorialReplayError("forensic replay bundle has no events")
@@ -87,8 +87,8 @@ def main() -> int:
     bundle = load_editorial_replay_bundle(args.forensic_jsonl)
     report = run_editorial_replay(
         bundle, client=OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))),
-        summary_model=os.getenv("SUMMARY_MODEL", "gpt-5.6-sol"), summary_reasoning=os.getenv("SUMMARY_REASONING", "medium"),
-        grounding_model=os.getenv("GROUNDING_MODEL", "gpt-5.6-luna"), grounding_reasoning=os.getenv("GROUNDING_REASONING", "medium"),
+        summary_model=os.getenv("SUMMARY_MODEL", "gpt-5.6-luna"), summary_reasoning=os.getenv("SUMMARY_REASONING", "low"),
+        grounding_model=os.getenv("GROUNDING_MODEL", "gpt-5.6-luna"), grounding_reasoning=os.getenv("GROUNDING_REASONING", "low"),
         concurrency=int(os.getenv("SUMMARY_CONCURRENCY", "4")),
     )
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

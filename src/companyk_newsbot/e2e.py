@@ -19,12 +19,18 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
+from companyk_newsbot.collection_coverage import DEFAULT_RSS_MIN_SUCCESS_RATIO, assess_collection_coverage
 from companyk_newsbot.config import KeywordMapConfig
+from companyk_newsbot.portfolio_registry import PortfolioRegistry, build_direct_query_plan
+from companyk_newsbot.route_a_only import process_route_a_articles
+from companyk_newsbot.judges.direct_event import DirectEventGrounder, DirectEventJudge
+from companyk_newsbot.enrichment import PublisherArticleEnricher
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
-from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, ResendEmailSender, ResendSettings
+from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, RenderedEmail, ResendEmailSender, ResendSettings
 from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
 from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
 from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
+from companyk_newsbot.judges.route_b_legacy import RouteBCascadeJudge as LegacyRouteBCascadeJudge
 from companyk_newsbot.judges.summary import NewsSummarizer as EditorialPayloadBuilder
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
@@ -32,6 +38,7 @@ from companyk_newsbot.state import JsonStateStore
 
 
 TEST_RECIPIENT = "jeremy.cheon@pm.me"
+PRODUCTION_RECIPIENT = "jeremy.cheon@pm.me"
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_SMOKE_DIRECT_QUERY_CAP = 8
 DEFAULT_SMOKE_EXPOSURE_QUERY_CAP = 8
@@ -40,7 +47,7 @@ DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
 DEFAULT_SMOKE_LOOKBACK_DAYS = 7
 DEFAULT_FIRST_RUN_HOURS = 30
 DEFAULT_OVERLAP_HOURS = 2
-ExecutionProfile = Literal["smoke", "full_shadow"]
+ExecutionProfile = Literal["smoke", "full_shadow", "production"]
 
 
 class E2EExecutionError(RuntimeError):
@@ -124,6 +131,83 @@ def _positive_int_from_environment(name: str, default: int) -> int:
     return value
 
 
+def _rss_min_success_ratio() -> float:
+    raw = os.getenv("RSS_MIN_SUCCESS_RATIO", str(DEFAULT_RSS_MIN_SUCCESS_RATIO)).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise E2EExecutionError("configuration", "RSS_MIN_SUCCESS_RATIO must be between 0 and 1") from exc
+    if not 0 <= value <= 1:
+        raise E2EExecutionError("configuration", "RSS_MIN_SUCCESS_RATIO must be between 0 and 1")
+    return value
+
+
+def _cost_first_enabled() -> bool:
+    return os.getenv("NEWSBOT_COST_FIRST_PIPELINE", "true").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _route_b_enabled() -> bool:
+    return os.getenv("ROUTE_B_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _route_a_event_resolver_enabled() -> bool:
+    return os.getenv("ROUTE_A_EVENT_RESOLVER_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _require_non_sol_model(stage: str, model: str) -> None:
+    if _cost_first_enabled() and "sol" in model.casefold():
+        raise E2EExecutionError("configuration", f"cost-first {stage} must not use Sol")
+
+
+def _usage_from_editorial_traces(traces: list[dict[str, object]]) -> dict[str, int]:
+    totals = Counter()
+    grounding_events = {"grounding_verification", "watchpoint_grounding", "core_grounding_verification"}
+    for trace in traces:
+        usage = trace.get("token_usage")
+        if not isinstance(usage, dict):
+            continue
+        prefix = "grounding" if trace.get("event") in grounding_events else "summary"
+        for source, target in (("input_tokens", "input_tokens"), ("output_tokens", "output_tokens")):
+            value = usage.get(source)
+            if isinstance(value, int):
+                totals[f"{prefix}_{target}"] += value
+        input_details = usage.get("input_tokens_details")
+        if isinstance(input_details, dict) and isinstance(input_details.get("cached_tokens"), int):
+            totals[f"{prefix}_cached_input_tokens"] += input_details["cached_tokens"]
+        output_details = usage.get("output_tokens_details")
+        if isinstance(output_details, dict) and isinstance(output_details.get("reasoning_tokens"), int):
+            totals[f"{prefix}_reasoning_tokens"] += output_details["reasoning_tokens"]
+    return dict(totals)
+
+
+def _estimated_stage_cost(metrics: dict[str, object], metric_prefix: str, price_prefix: str) -> float | None:
+    """Estimate one stage only when versioned per-million-token prices are configured."""
+    price_names = {
+        "input": f"{price_prefix}_INPUT_USD_PER_MILLION",
+        "cached": f"{price_prefix}_CACHED_INPUT_USD_PER_MILLION",
+        "output": f"{price_prefix}_OUTPUT_USD_PER_MILLION",
+    }
+    raw = {key: os.getenv(name, "").strip() for key, name in price_names.items()}
+    if not any(raw.values()):
+        return None
+    if not all(raw.values()) or not os.getenv("OPENAI_PRICING_VERSION", "").strip():
+        raise E2EExecutionError(
+            "configuration",
+            f"{price_prefix} pricing requires input, cached-input, output, and OPENAI_PRICING_VERSION",
+        )
+    try:
+        prices = {key: float(value) for key, value in raw.items()}
+    except ValueError as exc:
+        raise E2EExecutionError("configuration", f"invalid {price_prefix} pricing value") from exc
+    if any(value < 0 for value in prices.values()):
+        raise E2EExecutionError("configuration", f"{price_prefix} pricing values must be non-negative")
+    input_tokens = int(metrics.get(f"{metric_prefix}_input_tokens", 0) or 0)
+    cached_tokens = int(metrics.get(f"{metric_prefix}_cached_input_tokens", 0) or 0)
+    output_tokens = int(metrics.get(f"{metric_prefix}_output_tokens", 0) or 0)
+    uncached_tokens = max(0, input_tokens - cached_tokens)
+    return round((uncached_tokens * prices["input"] + cached_tokens * prices["cached"] + output_tokens * prices["output"]) / 1_000_000, 8)
+
+
 def _deterministic_sample(values: tuple[str, ...], cap: int, *, namespace: str) -> tuple[str, ...]:
     """Select a stable, order-independent slice instead of the YAML's first entries."""
     if len(values) <= cap:
@@ -165,7 +249,7 @@ def build_query_plan(
             raise E2EExecutionError("configuration", "smoke query caps must be positive")
         direct_queries = _deterministic_sample(all_direct, direct_limit, namespace="route_a")
         exposure_queries = _deterministic_sample(all_exposure, exposure_limit, namespace="route_b")
-    elif profile == "full_shadow":
+    elif profile in {"full_shadow", "production"}:
         direct_queries = all_direct
         exposure_queries = all_exposure
     else:  # pragma: no cover - guarded by the type and main entry point
@@ -183,7 +267,13 @@ def build_query_plan(
 
 def _assert_test_recipient(settings: ResendSettings) -> None:
     if settings.recipient.casefold() != TEST_RECIPIENT:
-        raise E2EExecutionError("safety_check", f"smoke E2E may send only to {TEST_RECIPIENT}")
+        raise E2EExecutionError("safety_check", f"test delivery may send only to {TEST_RECIPIENT}")
+
+
+def _assert_production_recipient(settings: ResendSettings) -> None:
+    """Keep the configured recipient boundary explicit for the frozen v1 rollout."""
+    if settings.recipient.casefold() != PRODUCTION_RECIPIENT:
+        raise E2EExecutionError("safety_check", "v1 production recipient must match the configured rollout recipient")
 
 
 def _openai_timeout_seconds() -> float:
@@ -248,21 +338,551 @@ def _emit_editorial_traces(run_id: str, traces: list[dict[str, object]]) -> None
         _log("editorial_trace", run_id=run_id, **trace_for_log)
 
 
+def _run_route_a_only_e2e(
+    registry: PortfolioRegistry,
+    store: JsonStateStore,
+    *,
+    now: datetime | None,
+    profile: ExecutionProfile,
+    deliver: bool,
+) -> E2EResult:
+    """Execute the default direct-news pipeline without loading or calling Route B."""
+    total_started = monotonic()
+    run_time = (now or datetime.now(UTC)).astimezone(UTC)
+    report_date = run_time.astimezone(KST).date()
+    settings = ResendSettings.from_environment() if deliver else None
+    if settings is not None:
+        if profile == "production":
+            _assert_production_recipient(settings)
+        else:
+            _assert_test_recipient(settings)
+
+    artifact_journal: FullShadowArtifactJournal | None = None
+    if profile == "full_shadow":
+        try:
+            artifact_dir = preflight_artifact_dir(os.getenv("ARTIFACT_DIR", ""))
+            artifact_journal = FullShadowArtifactJournal(artifact_dir, run_time)
+        except Exception as exc:
+            raise E2EExecutionError("artifact_storage", str(exc)) from exc
+
+    full_plan = build_direct_query_plan(registry)
+    if full_plan.uncovered_company_ids:
+        raise E2EExecutionError(
+            "configuration",
+            f"portfolio registry has {len(full_plan.uncovered_company_ids)} companies without direct queries",
+        )
+    if profile == "smoke":
+        cap = _positive_int_from_environment("E2E_DIRECT_QUERY_CAP", DEFAULT_SMOKE_DIRECT_QUERY_CAP)
+        direct_queries = _deterministic_sample(full_plan.queries, cap, namespace="route_a_registry")
+    elif profile in {"full_shadow", "production"}:
+        direct_queries = full_plan.queries
+    else:  # pragma: no cover
+        raise E2EExecutionError("configuration", f"unknown execution profile: {profile}")
+    if not direct_queries:
+        raise E2EExecutionError("configuration", "RSS collection requires at least one configured direct query")
+
+    delivery_checkpoint_before = store.last_delivery_datetime()
+    if profile == "smoke":
+        smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
+        freshness_window = smoke_window(now=run_time, lookback_days=smoke_days)
+        freshness_hint = f"when:{smoke_days}d"
+    else:
+        first_run_hours = _positive_int_from_environment("FRESHNESS_FIRST_RUN_HOURS", DEFAULT_FIRST_RUN_HOURS)
+        overlap_hours = _positive_int_from_environment("FRESHNESS_OVERLAP_HOURS", DEFAULT_OVERLAP_HOURS)
+        freshness_window = delivery_window(
+            now=run_time,
+            last_successful_delivery_run=delivery_checkpoint_before,
+            overlap_hours=overlap_hours,
+            first_run_hours=first_run_hours,
+        )
+        freshness_hint = "when:2d"
+    _log(
+        "queries_prepared",
+        profile=profile,
+        direct=len(direct_queries),
+        external=0,
+        query_count=len(direct_queries),
+        registry_companies=len(registry.companies),
+        route_b_enabled=False,
+    )
+
+    collection_started = monotonic()
+    try:
+        async def collect_all():
+            async with GoogleNewsRSSCollector(freshness_hint=freshness_hint) as collector:
+                return await collector.collect_many(direct_queries)
+
+        collection_result = asyncio.run(collect_all())
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"collection: {exc}")
+        raise E2EExecutionError("collection", str(exc)) from exc
+    collection_seconds = _seconds(collection_started)
+    collected = list(collection_result.articles)
+    rss_metrics = {**collection_result.metrics()}
+    try:
+        coverage = assess_collection_coverage(collection_result, threshold=_rss_min_success_ratio())
+    except ValueError as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"collection_coverage: {exc}")
+        raise E2EExecutionError("collection_coverage", str(exc)) from exc
+    rss_metrics.update(coverage.metrics())
+    skipped_failures = 0
+    for failure in collection_result.failures:
+        if failure.status == "skipped_systemic_failure":
+            skipped_failures += 1
+            continue
+        _log("collection_query_failed", query=failure.query, status=failure.status, reason=failure.error or failure.status)
+    if skipped_failures:
+        _log("collection_queries_skipped", status="skipped_systemic_failure", count=skipped_failures)
+    _log("collection_coverage_assessed", **rss_metrics)
+    if artifact_journal:
+        artifact_journal.update("collection", journal_collection_data(
+            collected,
+            query_count=len(direct_queries),
+            collection_successes=len(collection_result.successes),
+            collection_failures=len(collection_result.failures),
+            collected=len(collected),
+            freshness_accepted=None,
+        ))
+        artifact_journal.update("collection_coverage", {
+            **rss_metrics,
+            "reason": coverage.reason,
+        }, run_status="running" if coverage.sufficient else "inconclusive")
+
+    if not coverage.sufficient:
+        reason = coverage.reason or "collection_coverage_below_threshold"
+        zero_metrics: dict[str, object] = {
+            **rss_metrics,
+            "inconclusive_reason": reason,
+            "route_b_enabled": False,
+            "route_b_calls": 0,
+            "article_level_ai_calls": 0,
+            "production_sol_calls": 0,
+            "direct_assessment_calls": 0,
+            "direct_grounding_calls": 0,
+            "total_api_estimated_cost_usd": 0.0,
+        }
+        artifact_json_path: str | None = None
+        artifact_html_path: str | None = None
+        if profile == "full_shadow":
+            diagnostic = RenderedEmail(
+                subject=f"[SHADOW][수집 실패] 컴퍼니케이 데일리 | {report_date.isoformat()}",
+                html=(
+                    "<!doctype html><html lang=\"ko\"><body>"
+                    "<h1>뉴스 수집 실패</h1>"
+                    f"<p>RSS 수집 성공률이 {coverage.success_ratio:.1%}로 운영 기준 "
+                    f"{coverage.threshold:.1%}에 미달했습니다.</p>"
+                    "<p>이 문서는 정상 뉴스 브리핑이 아니며 이메일로 발송되지 않았습니다.</p>"
+                    "</body></html>"
+                ),
+            )
+            try:
+                artifact_json_path, artifact_html_path = write_full_shadow_artifacts(
+                    artifact_dir=_artifact_dir(store),
+                    run_time=run_time,
+                    metrics={
+                        "profile": profile,
+                        "registry_company_count": len(registry.companies),
+                        "query_count": len(direct_queries),
+                        "direct_query_count": len(direct_queries),
+                        "exposure_query_count": 0,
+                        "collection_successes": len(collection_result.successes),
+                        "collection_failures": len(collection_result.failures),
+                        "collected": len(collected),
+                        "final_email_items": 0,
+                        **zero_metrics,
+                    },
+                    delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
+                    rendered=diagnostic,
+                    email_items=[],
+                    route_a_events=[],
+                    route_b_events=[],
+                    judged=[],
+                    prefilter_rejections=[],
+                    shadow_delivery_id=None,
+                    journal=artifact_journal,
+                    debug_extra={
+                        "collection_failure_breakdown": [
+                            {
+                                "query": failure.query,
+                                "status": failure.status,
+                                "attempts": failure.attempts,
+                                "retry_attempts": failure.retry_attempts,
+                                "retry_after_used": failure.retry_after_used,
+                                "http_status": failure.http_status,
+                            }
+                            for failure in collection_result.failures
+                        ],
+                    },
+                    run_status="inconclusive",
+                    status_reason=reason,
+                )
+            except Exception as exc:
+                if artifact_journal:
+                    artifact_journal.fail(f"full_shadow_artifact: {exc}")
+                raise E2EExecutionError("full_shadow_artifact", str(exc)) from exc
+        result = E2EResult(
+            status="inconclusive",
+            profile=profile,
+            query_count=len(direct_queries),
+            direct_query_count=len(direct_queries),
+            exposure_query_count=0,
+            collection_successes=len(collection_result.successes),
+            collection_failures=len(collection_result.failures),
+            collection_seconds=collection_seconds,
+            collected=len(collected),
+            freshness_seconds=0.0,
+            freshness_window_start=freshness_window.start.isoformat(),
+            freshness_window_end=freshness_window.end.isoformat(),
+            freshness_mode=freshness_window.mode,
+            freshness_accepted=0,
+            freshness_rejected_too_old=0,
+            freshness_rejected_future=0,
+            freshness_rejected_missing_timestamp=0,
+            dedup_seconds=0.0,
+            article_deduped=0,
+            article_duplicates=0,
+            routing_seconds=0.0,
+            route_a_matches=0,
+            route_a_events=0,
+            route_b_candidates=0,
+            route_b_accepted=0,
+            route_b_rejected=0,
+            reject_reasons={reason: len(collection_result.failures)},
+            final_items=0,
+            already_sent=0,
+            same_run_duplicates=0,
+            openai_model=os.getenv("DIRECT_EVENT_MODEL", "gpt-5.6-luna"),
+            judge_seconds=0.0,
+            judge_calls=0,
+            cascade_metrics=zero_metrics,
+            summary_seconds=0.0,
+            summary_calls=0,
+            render_seconds=0.0,
+            email_seconds=0.0,
+            total_seconds=_seconds(total_started),
+            delivery_id=None,
+            artifact_json_path=artifact_json_path,
+            artifact_html_path=artifact_html_path,
+            production_delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
+        )
+        _log("e2e_complete", **result.log_payload())
+        return result
+
+    freshness_started = monotonic()
+    try:
+        freshness = filter_articles(collected, window=freshness_window)
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"freshness: {exc}")
+        raise E2EExecutionError("freshness", str(exc)) from exc
+    freshness_seconds = _seconds(freshness_started)
+    fresh_articles = list(freshness.accepted)
+    if artifact_journal:
+        artifact_journal.update("collection", journal_collection_data(
+            collected,
+            query_count=len(direct_queries),
+            collection_successes=len(collection_result.successes),
+            collection_failures=len(collection_result.failures),
+            collected=len(collected),
+            freshness_accepted=len(fresh_articles),
+        ))
+
+    dedup_started = monotonic()
+    try:
+        article_dedup = ArticleDeduplicator().deduplicate(fresh_articles)
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"article_dedup: {exc}")
+        raise E2EExecutionError("article_dedup", str(exc)) from exc
+    dedup_seconds = _seconds(dedup_started)
+    article_duplicates = sum(len(group.duplicates) for group in article_dedup.duplicate_groups)
+
+    enrichment_started = monotonic()
+    try:
+        enrichment = asyncio.run(
+            PublisherArticleEnricher.from_environment().enrich_all(list(article_dedup.articles), registry)
+        )
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"article_enrichment: {exc}")
+        raise E2EExecutionError("article_enrichment", str(exc)) from exc
+    enrichment_seconds = _seconds(enrichment_started)
+    enrichment_metrics = enrichment.metrics.payload()
+    if artifact_journal:
+        artifact_journal.update("enrichment", {
+            "metrics": {**enrichment_metrics, "enrichment_seconds": enrichment_seconds},
+            "articles": [
+                {
+                    "article_url": article.url,
+                    "canonical_url": article.canonical_url,
+                    "origin_queries": article.origin_metadata.get("origin_queries", []),
+                    "candidate_company_ids": article.origin_metadata.get("candidate_company_ids", []),
+                    "enrichment_attempted": article.origin_metadata.get("enrichment_attempted", False),
+                    "enrichment_status": article.origin_metadata.get("enrichment_status"),
+                    "resolved_url": article.origin_metadata.get("resolved_url"),
+                    "enrichment_source": article.origin_metadata.get("enrichment_source"),
+                    "enriched_char_count": article.origin_metadata.get("enriched_char_count", 0),
+                }
+                for article in enrichment.articles
+            ],
+        })
+
+    judge = DirectEventJudge.from_environment()
+    grounder = DirectEventGrounder.from_environment()
+    event_resolver = LunaEventPairResolver.from_environment() if _route_a_event_resolver_enabled() else None
+    processing_started = monotonic()
+    try:
+        processed = process_route_a_articles(
+            list(enrichment.articles),
+            registry,
+            judge=judge,
+            grounder=grounder,
+            event_resolver=event_resolver,
+        )
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"route_a_processing: {exc}")
+        raise E2EExecutionError("route_a_processing", str(exc)) from exc
+    processing_seconds = _seconds(processing_started)
+    event_resolver_metrics = (
+        event_resolver.metrics_payload()
+        if event_resolver is not None and hasattr(event_resolver, "metrics_payload")
+        else {"event_resolver_calls": 0, "event_resolver_failures": 0}
+    )
+    assessment_metrics = judge.metrics.payload("direct_assessment")
+    grounding_metrics = grounder.metrics.payload("direct_grounding")
+    assessment_cost = _estimated_stage_cost(assessment_metrics, "direct_assessment", "DIRECT_EVENT")
+    grounding_cost = _estimated_stage_cost(grounding_metrics, "direct_grounding", "DIRECT_GROUNDING")
+    cascade_metrics: dict[str, object] = {
+        **rss_metrics,
+        **enrichment_metrics,
+        "enrichment_seconds": enrichment_seconds,
+        **assessment_metrics,
+        **grounding_metrics,
+        **event_resolver_metrics,
+        "route_b_enabled": False,
+        "route_b_calls": 0,
+        "article_level_ai_calls": 0,
+        "production_sol_calls": 0,
+        "direct_assessment_estimated_cost_usd": assessment_cost,
+        "direct_grounding_estimated_cost_usd": grounding_cost,
+        "total_api_estimated_cost_usd": (
+            round((assessment_cost or 0.0) + (grounding_cost or 0.0), 8)
+            if assessment_cost is not None and grounding_cost is not None else None
+        ),
+        "direct_deliver_high": processed.deliver_high,
+        "direct_deliver_medium": processed.deliver_medium,
+        "direct_ignore": processed.ignore_count,
+    }
+    reject_reasons = {"direct_event:IGNORE": processed.ignore_count} if processed.ignore_count else {}
+    _log(
+        "route_a_processing_complete",
+        processing_seconds=processing_seconds,
+        article_deduped=len(article_dedup.articles),
+        article_duplicates=article_duplicates,
+        route_a_matches=len(processed.matches),
+        route_a_events=len(processed.events),
+        final_items=len(processed.email_items),
+        **cascade_metrics,
+    )
+
+    ranked = list(processed.ranked_items)
+    email_items = list(processed.email_items)
+    already_sent = 0
+    same_run_duplicates = 0
+    if profile != "full_shadow":
+        keep_indexes: list[int] = []
+        seen_run_fingerprints: set[tuple[str, str]] = set()
+        for index, item in enumerate(ranked):
+            identity = _fingerprint(item)
+            if identity in seen_run_fingerprints:
+                same_run_duplicates += 1
+                continue
+            seen_run_fingerprints.add(identity)
+            kind, fingerprint = identity
+            if store.was_sent(fingerprint, kind=kind):
+                already_sent += 1
+            else:
+                keep_indexes.append(index)
+        ranked = [ranked[index] for index in keep_indexes]
+        email_items = [email_items[index] for index in keep_indexes]
+
+    render_started = monotonic()
+    try:
+        rendered = HtmlEmailRenderer().render(email_items, report_date=report_date, route_b_enabled=False)
+        if profile == "full_shadow":
+            rendered = RenderedEmail(
+                subject=f"[SHADOW] 컴퍼니케이 데일리 | {report_date.isoformat()} | 주요 뉴스 {len(email_items)}건",
+                html=rendered.html,
+            )
+    except Exception as exc:
+        if artifact_journal:
+            artifact_journal.fail(f"email_render: {exc}")
+        raise E2EExecutionError("email_render", str(exc)) from exc
+    render_seconds = _seconds(render_started)
+    delivery_id: str | None = None
+    email_seconds = 0.0
+    if settings is not None:
+        email_started = monotonic()
+        sender = ResendEmailSender(settings)
+        try:
+            delivery_id = sender.send(rendered)
+        except Exception as exc:
+            if artifact_journal:
+                artifact_journal.fail(f"resend_delivery: {exc}")
+            raise E2EExecutionError("resend_delivery", str(exc)) from exc
+        finally:
+            sender.close()
+        email_seconds = _seconds(email_started)
+
+    if delivery_id is not None and profile != "full_shadow":
+        for item in ranked:
+            kind, fingerprint = _fingerprint(item)
+            store.mark_sent(fingerprint, kind=kind)
+
+    artifact_json_path: str | None = None
+    artifact_html_path: str | None = None
+    if profile == "full_shadow":
+        try:
+            artifact_json_path, artifact_html_path = write_full_shadow_artifacts(
+                artifact_dir=_artifact_dir(store),
+                run_time=run_time,
+                metrics={
+                    "profile": profile,
+                    "registry_company_count": len(registry.companies),
+                    "query_count": len(direct_queries),
+                    "direct_query_count": len(direct_queries),
+                    "exposure_query_count": 0,
+                    "collection_successes": len(collection_result.successes),
+                    "collection_failures": len(collection_result.failures),
+                    "collected": len(collected),
+                    "freshness_accepted": len(fresh_articles),
+                    "article_deduped": len(article_dedup.articles),
+                    "article_duplicates": article_duplicates,
+                    "dedup_seconds": dedup_seconds,
+                    "enrichment_seconds": enrichment_seconds,
+                    "route_a_matches": len(processed.matches),
+                    "route_a_events": len(processed.events),
+                    "route_b_candidates": 0,
+                    "route_b_accepted": 0,
+                    "route_b_rejected": 0,
+                    "final_email_items": len(email_items),
+                    "unsupported_fact_fallbacks": sum(v.fact_summary == "UNSUPPORTED" for v in processed.grounding_verdicts.values()),
+                    "unsupported_insights_dropped": sum(v.investor_insight == "UNSUPPORTED" for v in processed.grounding_verdicts.values()),
+                    "unsupported_output_delivered": 0,
+                    **cascade_metrics,
+                },
+                delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
+                rendered=rendered,
+                email_items=email_items,
+                route_a_events=list(processed.events),
+                route_b_events=[],
+                judged=[],
+                prefilter_rejections=[],
+                shadow_delivery_id=delivery_id,
+                journal=artifact_journal,
+                debug_extra={
+                    "portfolio_registry": registry.source.model_dump(),
+                    "direct_query_coverage": {
+                        "query_count": len(full_plan.queries),
+                        "attempted_query_count": len(direct_queries),
+                        "company_ids_by_normalized_query": full_plan.company_ids_by_query,
+                        "uncovered_company_ids": list(full_plan.uncovered_company_ids),
+                    },
+                    "direct_event_assessments": {key: value.model_dump() for key, value in processed.assessments.items()},
+                    "direct_grounding_verdicts": {key: value.model_dump() for key, value in processed.grounding_verdicts.items()},
+                    "enrichment_audit": [
+                        {
+                            "article_url": article.url,
+                            "canonical_url": article.canonical_url,
+                            "origin_queries": article.origin_metadata.get("origin_queries", []),
+                            "candidate_company_ids": article.origin_metadata.get("candidate_company_ids", []),
+                            "enrichment_attempted": article.origin_metadata.get("enrichment_attempted", False),
+                            "enrichment_status": article.origin_metadata.get("enrichment_status"),
+                            "resolved_url": article.origin_metadata.get("resolved_url"),
+                            "enrichment_source": article.origin_metadata.get("enrichment_source"),
+                            "enriched_char_count": article.origin_metadata.get("enriched_char_count", 0),
+                        }
+                        for article in enrichment.articles
+                    ],
+                },
+            )
+        except Exception as exc:
+            if artifact_journal:
+                artifact_journal.fail(f"full_shadow_artifact: {exc}")
+            raise E2EExecutionError("full_shadow_artifact", str(exc)) from exc
+
+    result = E2EResult(
+        status="success",
+        profile=profile,
+        query_count=len(direct_queries),
+        direct_query_count=len(direct_queries),
+        exposure_query_count=0,
+        collection_successes=len(collection_result.successes),
+        collection_failures=len(collection_result.failures),
+        collection_seconds=collection_seconds,
+        collected=len(collected),
+        freshness_seconds=freshness_seconds,
+        freshness_window_start=freshness.window.start.isoformat(),
+        freshness_window_end=freshness.window.end.isoformat(),
+        freshness_mode=freshness.window.mode,
+        freshness_accepted=len(fresh_articles),
+        freshness_rejected_too_old=freshness.rejected_too_old,
+        freshness_rejected_future=freshness.rejected_future,
+        freshness_rejected_missing_timestamp=freshness.rejected_missing_timestamp,
+        dedup_seconds=dedup_seconds,
+        article_deduped=len(article_dedup.articles),
+        article_duplicates=article_duplicates,
+        routing_seconds=processing_seconds,
+        route_a_matches=len(processed.matches),
+        route_a_events=len(processed.events),
+        route_b_candidates=0,
+        route_b_accepted=0,
+        route_b_rejected=0,
+        reject_reasons=reject_reasons,
+        final_items=len(email_items),
+        already_sent=already_sent,
+        same_run_duplicates=same_run_duplicates,
+        openai_model=judge.model,
+        judge_seconds=processing_seconds,
+        judge_calls=judge.metrics.calls,
+        cascade_metrics=cascade_metrics,
+        summary_seconds=0.0,
+        summary_calls=0,
+        render_seconds=render_seconds,
+        email_seconds=email_seconds,
+        total_seconds=_seconds(total_started),
+        delivery_id=delivery_id,
+        artifact_json_path=artifact_json_path,
+        artifact_html_path=artifact_html_path,
+        production_delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
+    )
+    _log("e2e_complete", **result.log_payload())
+    return result
+
+
 def run_real_e2e(
-    config: KeywordMapConfig,
+    config: KeywordMapConfig | PortfolioRegistry,
     store: JsonStateStore,
     *,
     now: datetime | None = None,
     profile: ExecutionProfile = "smoke",
     deliver: bool = True,
 ) -> E2EResult:
-    """Run real services; only smoke may deliver, and only to the fixed test recipient."""
+    """Run real services with profile-specific recipient and delivery safety checks."""
+    if profile == "production" and _route_b_enabled():
+        raise E2EExecutionError("configuration", "production requires ROUTE_B_ENABLED=false")
+    if not _route_b_enabled():
+        registry = config if isinstance(config, PortfolioRegistry) else PortfolioRegistry.from_legacy(config)
+        return _run_route_a_only_e2e(registry, store, now=now, profile=profile, deliver=deliver)
+    if not isinstance(config, KeywordMapConfig):
+        raise E2EExecutionError("configuration", "ROUTE_B_ENABLED requires legacy keyword map config")
     total_started = monotonic()
     run_time = (now or datetime.now(UTC)).astimezone(UTC)
     run_id = f"full_shadow_{run_time.strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:12]}"
     report_date = run_time.astimezone(KST).date()
-    if deliver and profile != "smoke":
-        raise E2EExecutionError("safety_check", "full_shadow is a non-delivery profile")
     settings = ResendSettings.from_environment() if deliver else None
     if settings is not None:
         _assert_test_recipient(settings)
@@ -407,7 +1027,11 @@ def run_real_e2e(
     judge_started = monotonic()
     judged = []
     cascade_metrics: dict[str, object] = {}
-    openai_model = os.getenv("ROUTE_B_PRIMARY_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-sol")).strip()
+    openai_model = (
+        os.getenv("ROUTE_B_NANO_MODEL", "gpt-5.4-nano").strip()
+        if _cost_first_enabled()
+        else os.getenv("ROUTE_B_PRIMARY_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.6-sol")).strip()
+    )
     try:
         if profile == "smoke":
             candidates_to_judge = candidate_result.candidates[:SMOKE_MAX_JUDGE_CALLS]
@@ -418,8 +1042,9 @@ def run_real_e2e(
         if skipped_for_cap:
             reasons["smoke_judge_cap"] += len(skipped_for_cap)
             _log("route_b_judge_cap", max_calls=SMOKE_MAX_JUDGE_CALLS, skipped=len(skipped_for_cap))
-        if profile == "full_shadow":
-            cascade = RouteBCascadeJudge.from_environment()
+        if profile == "full_shadow" or _cost_first_enabled():
+            cascade_class = RouteBCascadeJudge if _cost_first_enabled() else LegacyRouteBCascadeJudge
+            cascade = cascade_class.from_environment()
             judged = cascade.judge_all_sync(candidates_to_judge)
             cascade_metrics = cascade.metrics.payload()
             for result in judged:
@@ -459,6 +1084,11 @@ def run_real_e2e(
         if artifact_journal:
             artifact_journal.fail(f"route_b_event_dedup: {exc}")
         raise E2EExecutionError("route_b_event_dedup", str(exc)) from exc
+    event_resolver_metrics = (
+        event_resolver.metrics_payload()
+        if event_resolver is not None and hasattr(event_resolver, "metrics_payload")
+        else {}
+    )
     if artifact_journal:
         artifact_journal.update("event_dedup", journal_event_data(
             route_a_events,
@@ -533,6 +1163,9 @@ def run_real_e2e(
         "insight_implication_count": 0, "insight_watchpoint_count": 0, "grounding_verifier_calls": 0,
         "grounding_verifier_failures": 0, "unsupported_implications": 0, "watchpoint_rewrites": 0,
         "watchpoint_fallbacks": 0, "core_rewrites": 0, "core_fallbacks": 0,
+        "summary_input_tokens": 0, "summary_cached_input_tokens": 0, "summary_output_tokens": 0,
+        "summary_reasoning_tokens": 0, "grounding_input_tokens": 0, "grounding_cached_input_tokens": 0,
+        "grounding_output_tokens": 0, "grounding_reasoning_tokens": 0,
     }
     if profile == "smoke" and not unsent:
         status = "inconclusive"
@@ -549,19 +1182,23 @@ def run_real_e2e(
             from openai import OpenAI
 
             summary_client = OpenAI(timeout=_openai_timeout_seconds())
-            summary_model = os.getenv("SUMMARY_MODEL", "gpt-5.6-sol")
-            summary_reasoning = os.getenv("SUMMARY_REASONING", "medium")
+            summary_model = os.getenv("SUMMARY_MODEL", "gpt-5.6-luna")
+            summary_reasoning = os.getenv("SUMMARY_REASONING", "low")
             grounding_model = os.getenv("GROUNDING_MODEL", "gpt-5.6-luna")
-            grounding_reasoning = os.getenv("GROUNDING_REASONING", "medium")
+            grounding_reasoning = os.getenv("GROUNDING_REASONING", "low")
+            _require_non_sol_model("editorial model", summary_model)
+            _require_non_sol_model("grounding model", grounding_model)
             def summarize_one(item: RankedNewsItem):
                 verifier = InsightGroundingVerifier(summary_client, model=grounding_model, reasoning_effort=grounding_reasoning)
                 worker = NewsSummarizer(summary_client, model=summary_model, reasoning_effort=summary_reasoning, grounding_verifier=verifier)
                 try:
                     output = worker.summarize(item)
                     metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "insight_watchpoint_count": 1}
+                    metrics.update(_usage_from_editorial_traces(getattr(worker, "forensic_trace", [])))
                     return item, output, metrics, None, getattr(worker, "forensic_trace", [])
                 except Exception as exc:
                     metrics = worker.metrics.payload() if hasattr(worker, "metrics") else {**summary_metrics, "summary_calls": 1, "summary_failures": 1}
+                    metrics.update(_usage_from_editorial_traces(getattr(worker, "forensic_trace", [])))
                     return item, None, metrics, str(exc), getattr(worker, "forensic_trace", [])
             summary_concurrency = _positive_int_from_environment("SUMMARY_CONCURRENCY", 4)
             with ThreadPoolExecutor(max_workers=summary_concurrency) as pool:
@@ -608,6 +1245,11 @@ def run_real_e2e(
         render_started = monotonic()
         try:
             rendered = HtmlEmailRenderer().render(email_items, report_date=report_date)
+            if profile == "full_shadow":
+                rendered = RenderedEmail(
+                    subject=f"[SHADOW] 컴퍼니케이 데일리 | {report_date.isoformat()} | 주요 뉴스 {len(email_items)}건",
+                    html=rendered.html,
+                )
             render_seconds = _seconds(render_started)
             if settings is not None:
                 email_started = monotonic()
@@ -629,7 +1271,7 @@ def run_real_e2e(
             delivered=delivery_id is not None,
         )
 
-    if delivery_id is not None:
+    if delivery_id is not None and profile != "full_shadow":
         for item in unsent:
             kind, fingerprint = _fingerprint(item)
             store.mark_sent(fingerprint, kind=kind)
@@ -671,6 +1313,7 @@ def run_real_e2e(
                     "judge_calls": len(judged),
                     "summary_seconds": summary_seconds,
                     "summary_calls": len(email_items),
+                    "final_email_items": len(email_items),
                     "render_seconds": render_seconds,
                     "qualified_route_a_articles": len(route_a_matches),
                     "qualified_route_b_articles": len({result.candidate.article.canonical_url for result in accepted}),
@@ -689,8 +1332,11 @@ def run_real_e2e(
                     "ambiguous_pairs": route_a_clusterer.metrics.ambiguous_pairs + route_b_clusterer.metrics.ambiguous_pairs,
                     "luna_event_dedup_calls": route_a_clusterer.metrics.luna_event_dedup_calls + route_b_clusterer.metrics.luna_event_dedup_calls,
                     "luna_event_dedup_failures": route_a_clusterer.metrics.luna_event_dedup_failures + route_b_clusterer.metrics.luna_event_dedup_failures,
+                    **event_resolver_metrics,
                     **summary_metrics,
                     **cascade_metrics,
+                    "unsupported_output_delivered": 0,
+                    "production_sol_calls": 0,
                 },
                 delivery_checkpoint_before=(
                     delivery_checkpoint_before.isoformat() if delivery_checkpoint_before is not None else None
@@ -701,6 +1347,7 @@ def run_real_e2e(
                 route_b_events=route_b_events,
                 judged=judged,
                 prefilter_rejections=candidate_result.rejections,
+                shadow_delivery_id=delivery_id,
                 journal=artifact_journal,
             )
         except Exception as exc:
@@ -712,7 +1359,8 @@ def run_real_e2e(
             artifact_seconds=_seconds(artifact_started),
             artifact_json_path=artifact_json_path,
             artifact_html_path=artifact_html_path,
-            email_sent=False,
+            production_email_sent=False,
+            shadow_test_email_sent=delivery_id is not None,
         )
 
     result = E2EResult(

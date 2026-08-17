@@ -16,13 +16,13 @@ from companyk_newsbot.models import Article
 from companyk_newsbot.ranking import RankedNewsItem
 
 SUMMARY_PROMPT_VERSION = "grounded_event_editor_v3"
-SUMMARY_SYSTEM_PROMPT = """Write one concise Korean factual summary and one executive/investment insight for the supplied ranked event.
+SUMMARY_SYSTEM_PROMPT = """Write a short Korean morning-brief item. Prefer one compact factual sentence; add one short direct relevance line only when needed.
 Use only supplied evidence. Do not introduce valuation, ownership, runway, revenue, market share, probability,
 timeline, or causal claims unless directly supported or tightly logically entailed by approved context. If a
 defensible implication is not supported, use insight_mode=watchpoint and identify a concrete observable variable
 or milestone. Never use generic filler such as 귀추가 주목된다, 긍정적 영향, 부정적 영향, 기업가치 상승 기대,
 경쟁력 강화 전망, 성장이 기대된다, or 큰 도움이 될 전망. Never invent a stronger implication merely to
-avoid watchpoint mode. Do not claim that the article omits, has not disclosed, or has not reported a fact unless
+avoid watchpoint mode. Do not add speculative watchpoints merely to fill space. Do not claim that the article omits, has not disclosed, or has not reported a fact unless
 the supplied evidence explicitly states that absence. Do not infer an entity's type, role, function, product status,
 organizational status, or commercial status unless the evidence explicitly establishes it. Do not strengthen association,
 competition, relevance, or possibility into causation, evaluation criteria, commercial impact, or strategic consequence
@@ -52,7 +52,7 @@ class SummaryOutput(BaseModel):
 
     fact_summary: str = Field(min_length=1, max_length=500)
     why_it_matters: str | None = Field(default=None, max_length=350)
-    insight_one_liner: str = Field(min_length=1, max_length=500)
+    insight_one_liner: str | None = Field(default=None, min_length=1, max_length=500)
     insight_dimension: Literal["exit_liquidity", "financing_runway", "valuation_comps", "revenue_traction", "regulatory_clinical", "commercialization", "cost_supply", "customer_platform", "competition", "governance", "strategy", "other"]
     insight_mode: Literal["implication", "watchpoint"]
     confidence: Literal["high", "medium"]

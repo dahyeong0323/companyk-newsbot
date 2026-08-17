@@ -28,7 +28,7 @@ def external_item() -> EmailNewsItem:
 
 def test_renderer_separates_routes_and_escapes_untrusted_content() -> None:
     rendered = HtmlEmailRenderer().render([direct_item(), external_item()], report_date=date(2026, 8, 12))
-    assert rendered.subject == "[Company K] 포트폴리오 데일리 뉴스 | 2026-08-12"
+    assert rendered.subject == "[Company K] 포트폴리오 데일리 뉴스 | 2026-08-12 | 주요 뉴스 2건"
     assert "1. 기업 직접 뉴스" in rendered.html
     assert "2. 포트폴리오 영향 뉴스" in rendered.html
     assert "왜 이 회사에 중요한가:" in rendered.html
@@ -41,3 +41,16 @@ def test_renderer_separates_routes_and_escapes_untrusted_content() -> None:
 def test_renderer_displays_empty_section_without_error() -> None:
     rendered = HtmlEmailRenderer().render([direct_item()], report_date=date(2026, 8, 12))
     assert "해당 뉴스가 없습니다." in rendered.html
+
+
+def test_route_a_zero_news_uses_the_frozen_v1_sentence() -> None:
+    rendered = HtmlEmailRenderer().render([], report_date=date(2026, 8, 12), route_b_enabled=False)
+    assert "오늘 컴퍼니케이파트너스 포트폴리오 회사의 주요 기사는 없습니다." in rendered.html
+
+
+def test_route_a_only_renderer_omits_route_b_section_entirely() -> None:
+    rendered = HtmlEmailRenderer().render(
+        [direct_item()], report_date=date(2026, 8, 12), route_b_enabled=False
+    )
+    assert "2. 포트폴리오 영향 뉴스" not in rendered.html
+    assert "해당 회사에 중요한 이유:" not in rendered.html

@@ -5,6 +5,7 @@
   },
   "deploy": {
     "startCommand": "python -m companyk_newsbot.main",
+    "cronSchedule": "0 23 * * *",
     "restartPolicyType": "NEVER",
     "restartPolicyMaxRetries": 1
   }

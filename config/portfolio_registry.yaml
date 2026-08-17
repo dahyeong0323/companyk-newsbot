@@ -1,0 +1,3006 @@
+schema_version: '1.0'
+source:
+  workbook: 투자잔액(20260630).xlsx
+  sheet: Sheet2
+  column: A
+  source_sha256: e2386c135112c8e505fc2bcd8e98f4994ea567fc9d51e7bda1a0a26ee53282a5
+  generated_at: '2026-07-12T09:44:58'
+  company_count: 155
+companies:
+- company_id: company-3875ab059ddd4491
+  display_name: 겟차
+  source_name: (주)겟차
+  legal_names:
+  - (주)겟차
+  former_names: []
+  search_terms:
+  - 겟차
+  match_terms:
+  - 겟차
+  - (주)겟차
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-cd42eced5545d8f4
+  display_name: 고바이오랩
+  source_name: (주)고바이오랩
+  legal_names:
+  - (주)고바이오랩
+  former_names: []
+  search_terms:
+  - 고바이오랩
+  match_terms:
+  - 고바이오랩
+  - (주)고바이오랩
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d75f32d04dbfeecc
+  display_name: 나르마
+  source_name: (주)나르마
+  legal_names:
+  - (주)나르마
+  former_names: []
+  search_terms:
+  - 나르마
+  match_terms:
+  - 나르마
+  - (주)나르마
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-78faf326ff50ebc9
+  display_name: 넥스아이
+  source_name: (주)넥스아이
+  legal_names:
+  - (주)넥스아이
+  former_names: []
+  search_terms:
+  - 넥스아이
+  match_terms:
+  - 넥스아이
+  - (주)넥스아이
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-47eb5d03862b4fa2
+  display_name: 넥스윌
+  source_name: (주)넥스윌
+  legal_names:
+  - (주)넥스윌
+  former_names: []
+  search_terms:
+  - 넥스윌
+  match_terms:
+  - 넥스윌
+  - (주)넥스윌
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-7007f136e8a529fc
+  display_name: 노타
+  source_name: (주)노타
+  legal_names:
+  - (주)노타
+  former_names: []
+  search_terms:
+  - 노타
+  match_terms:
+  - 노타
+  - (주)노타
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c8a31cfd532359d3
+  display_name: 뉴냅스
+  source_name: (주)뉴냅스
+  legal_names:
+  - (주)뉴냅스
+  former_names: []
+  search_terms:
+  - 뉴냅스
+  match_terms:
+  - 뉴냅스
+  - (주)뉴냅스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-205a4f43dd8a0090
+  display_name: 뉴롭티카
+  source_name: (주)뉴롭티카
+  legal_names:
+  - (주)뉴롭티카
+  former_names: []
+  search_terms:
+  - 뉴롭티카
+  match_terms:
+  - 뉴롭티카
+  - (주)뉴롭티카
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-96e66d20fa8889a3
+  display_name: 니어스랩
+  source_name: (주)니어스랩
+  legal_names:
+  - (주)니어스랩
+  former_names: []
+  search_terms:
+  - 니어스랩
+  match_terms:
+  - 니어스랩
+  - (주)니어스랩
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-f3387bf1553ef55d
+  display_name: 다안바이오테라퓨틱스
+  source_name: (주)다안바이오테라퓨틱스
+  legal_names:
+  - (주)다안바이오테라퓨틱스
+  former_names: []
+  search_terms:
+  - 다안바이오테라퓨틱스
+  match_terms:
+  - 다안바이오테라퓨틱스
+  - (주)다안바이오테라퓨틱스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c28ba7c401663a90
+  display_name: 다인메디컬그룹
+  source_name: (주)다인메디컬그룹
+  legal_names:
+  - (주)다인메디컬그룹
+  former_names: []
+  search_terms:
+  - 다인메디컬그룹
+  match_terms:
+  - 다인메디컬그룹
+  - (주)다인메디컬그룹
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d6b48b3cad719ce7
+  display_name: 데이터뱅크
+  source_name: (주)데이터뱅크
+  legal_names:
+  - (주)데이터뱅크
+  former_names: []
+  search_terms:
+  - 데이터뱅크
+  match_terms:
+  - 데이터뱅크
+  - (주)데이터뱅크
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ae02a3760e7f8ca6
+  display_name: 디든로보틱스
+  source_name: (주)디든로보틱스
+  legal_names:
+  - (주)디든로보틱스
+  former_names: []
+  search_terms:
+  - 디든로보틱스
+  match_terms:
+  - 디든로보틱스
+  - (주)디든로보틱스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-81d5604218ca085a
+  display_name: 딥오토
+  source_name: (주)딥오토
+  legal_names:
+  - (주)딥오토
+  former_names: []
+  search_terms:
+  - 딥오토
+  match_terms:
+  - 딥오토
+  - (주)딥오토
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-7ad9fda2d12851bd
+  display_name: 라이온로보틱스
+  source_name: (주)라이온로보틱스
+  legal_names:
+  - (주)라이온로보틱스
+  former_names: []
+  search_terms:
+  - 라이온로보틱스
+  match_terms:
+  - 라이온로보틱스
+  - (주)라이온로보틱스
+  - 라이보
+  - 라이보2
+  - Raion Robotics
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 라온로보틱스
+    - 레인보우로보틱스
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e8ed93da0cbacfe1
+  display_name: 라포랩스
+  source_name: (주)라포랩스
+  legal_names:
+  - (주)라포랩스
+  former_names: []
+  search_terms:
+  - 라포랩스
+  match_terms:
+  - 라포랩스
+  - (주)라포랩스
+  - 퀸잇
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ffeb780dada2e6c3
+  display_name: 라피끄
+  source_name: (주)라피끄
+  legal_names:
+  - (주)라피끄
+  former_names: []
+  search_terms:
+  - 라피끄
+  match_terms:
+  - 라피끄
+  - (주)라피끄
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c520b0a19170cfa6
+  display_name: 럭스로보
+  source_name: (주)럭스로보
+  legal_names:
+  - (주)럭스로보
+  former_names: []
+  search_terms:
+  - 럭스로보
+  match_terms:
+  - 럭스로보
+  - (주)럭스로보
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-697bdfe9195fe67e
+  display_name: 마이프랜차이즈
+  source_name: (주)마이프랜차이즈
+  legal_names:
+  - (주)마이프랜차이즈
+  former_names: []
+  search_terms:
+  - 마이프랜차이즈
+  match_terms:
+  - 마이프랜차이즈
+  - (주)마이프랜차이즈
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-30e8486e1ee30bf8
+  display_name: 매이드
+  source_name: (주)매이드
+  legal_names:
+  - (주)매이드
+  former_names: []
+  search_terms:
+  - 매이드
+  match_terms:
+  - 매이드
+  - (주)매이드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-67c4b8dc47f8d584
+  display_name: 메디노
+  source_name: (주)메디노
+  legal_names:
+  - (주)메디노
+  former_names: []
+  search_terms:
+  - 메디노
+  match_terms:
+  - 메디노
+  - (주)메디노
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 메디포스트
+    - 메디톡스
+    - 메디노벨
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-46e0ab5b3c199337
+  display_name: 메디쿼터스
+  source_name: (주)메디쿼터스
+  legal_names:
+  - (주)메디쿼터스
+  former_names: []
+  search_terms:
+  - 메디쿼터스
+  match_terms:
+  - 메디쿼터스
+  - (주)메디쿼터스
+  - NUGU
+  - 누구
+  ambiguity:
+    required_context:
+    - K패션
+    - 일본
+    - 패션
+    negative_context: []
+    forbidden_standalone:
+    - 누구
+    - NUGU
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c549062306837d3b
+  display_name: 메디테라피
+  source_name: (주)메디테라피
+  legal_names:
+  - (주)메디테라피
+  former_names: []
+  search_terms:
+  - 메디테라피
+  match_terms:
+  - 메디테라피
+  - (주)메디테라피
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 메디큐브
+    - 메디힐
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e4c8c7dba4bdee23
+  display_name: 메디픽셀
+  source_name: (주)메디픽셀
+  legal_names:
+  - (주)메디픽셀
+  former_names: []
+  search_terms:
+  - 메디픽셀
+  match_terms:
+  - 메디픽셀
+  - (주)메디픽셀
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-4e0b19a3f406b4ba
+  display_name: 메이크스타
+  source_name: (주)메이크스타
+  legal_names:
+  - (주)메이크스타
+  former_names: []
+  search_terms:
+  - 메이크스타
+  match_terms:
+  - 메이크스타
+  - (주)메이크스타
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-44b23e7a0b52d07c
+  display_name: 모빌린트
+  source_name: (주)모빌린트
+  legal_names:
+  - (주)모빌린트
+  former_names: []
+  search_terms:
+  - 모빌린트
+  match_terms:
+  - 모빌린트
+  - (주)모빌린트
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-237165eef59cbb3d
+  display_name: 바로팜
+  source_name: (주)바로팜
+  legal_names:
+  - (주)바로팜
+  former_names: []
+  search_terms:
+  - 바로팜
+  match_terms:
+  - 바로팜
+  - (주)바로팜
+  - 어라운드팜
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c72f897674038312
+  display_name: 바른손씨앤씨
+  source_name: (주)바른손씨앤씨
+  legal_names:
+  - (주)바른손씨앤씨
+  former_names: []
+  search_terms:
+  - 바른손씨앤씨
+  match_terms:
+  - 바른손씨앤씨
+  - (주)바른손씨앤씨
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-136f36dc7be0b74a
+  display_name: 바인드
+  source_name: (주)바인드
+  legal_names:
+  - (주)바인드
+  former_names: []
+  search_terms:
+  - 바인드
+  match_terms:
+  - 바인드
+  - (주)바인드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ab6d89f4a481353c
+  display_name: 뱅크샐러드
+  source_name: (주)뱅크샐러드
+  legal_names:
+  - (주)뱅크샐러드
+  former_names: []
+  search_terms:
+  - 뱅크샐러드
+  match_terms:
+  - 뱅크샐러드
+  - (주)뱅크샐러드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-a8b4f30a25360a76
+  display_name: 버즈빌
+  source_name: (주)버즈빌
+  legal_names:
+  - (주)버즈빌
+  former_names: []
+  search_terms:
+  - 버즈빌
+  match_terms:
+  - 버즈빌
+  - (주)버즈빌
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ddf8be41871b54ea
+  display_name: 베슬에이아이코리아
+  source_name: (주)베슬에이아이코리아
+  legal_names:
+  - (주)베슬에이아이코리아
+  former_names: []
+  search_terms:
+  - 베슬에이아이코리아
+  match_terms:
+  - 베슬에이아이코리아
+  - (주)베슬에이아이코리아
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-397988f1e7ce1a58
+  display_name: 부스트이뮨
+  source_name: (주)부스트이뮨
+  legal_names:
+  - (주)부스트이뮨
+  former_names: []
+  search_terms:
+  - 부스트이뮨
+  match_terms:
+  - 부스트이뮨
+  - (주)부스트이뮨
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-68fea39aa03d26eb
+  display_name: 브이씨
+  source_name: (주)브이씨
+  legal_names:
+  - (주)브이씨
+  former_names: []
+  search_terms:
+  - 브이씨
+  match_terms:
+  - 브이씨
+  - (주)브이씨
+  - 보이스캐디
+  - '365900'
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 브이씨
+    - VC
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-38f1bf9d93fc7371
+  display_name: 블룸에이아이
+  source_name: (주)블룸에이아이(구,루나소프트)
+  legal_names:
+  - (주)블룸에이아이
+  former_names:
+  - 루나소프트
+  search_terms:
+  - 블룸에이아이
+  - 루나소프트
+  match_terms:
+  - 블룸에이아이
+  - (주)블룸에이아이
+  - 루나소프트
+  - 블룸AI
+  - Blumn AI
+  - 해피톡
+  - 콜브릿지
+  - 엠비아이솔루션
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-7d041ec90cd8d1cb
+  display_name: 블리몽키즈
+  source_name: (주)블리몽키즈
+  legal_names:
+  - (주)블리몽키즈
+  former_names: []
+  search_terms:
+  - 블리몽키즈
+  match_terms:
+  - 블리몽키즈
+  - (주)블리몽키즈
+  - 마카롱
+  ambiguity:
+    required_context:
+    - 인도
+    - K뷰티
+    - 블리몽키즈
+    negative_context:
+    - 마카롱팩토리
+    forbidden_standalone:
+    - 마카롱
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-bb986d267aff0d8d
+  display_name: 샌드박스네트워크
+  source_name: (주)샌드박스네트워크
+  legal_names:
+  - (주)샌드박스네트워크
+  former_names: []
+  search_terms:
+  - 샌드박스네트워크
+  match_terms:
+  - 샌드박스네트워크
+  - (주)샌드박스네트워크
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-48dedcd6b80b95c9
+  display_name: 서남
+  source_name: (주)서남
+  legal_names:
+  - (주)서남
+  former_names: []
+  search_terms:
+  - 서남
+  match_terms:
+  - 서남
+  - (주)서남
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-72fdf18a297b52b4
+  display_name: 소크라에이아이
+  source_name: (주)소크라에이아이(구,뤼이드)
+  legal_names:
+  - (주)소크라에이아이
+  former_names:
+  - 뤼이드
+  search_terms:
+  - 소크라에이아이
+  - 뤼이드
+  match_terms:
+  - 소크라에이아이
+  - (주)소크라에이아이
+  - 뤼이드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-41a7f11fdaea7195
+  display_name: 솔리드아이오닉스
+  source_name: (주)솔리드아이오닉스
+  legal_names:
+  - (주)솔리드아이오닉스
+  former_names: []
+  search_terms:
+  - 솔리드아이오닉스
+  match_terms:
+  - 솔리드아이오닉스
+  - (주)솔리드아이오닉스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-90b9677e293b691a
+  display_name: 스타일씨코퍼레이션
+  source_name: (주)스타일씨코퍼레이션
+  legal_names:
+  - (주)스타일씨코퍼레이션
+  former_names: []
+  search_terms:
+  - 스타일씨코퍼레이션
+  match_terms:
+  - 스타일씨코퍼레이션
+  - (주)스타일씨코퍼레이션
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-3db872f4b8bc9ca6
+  display_name: 스텝랩
+  source_name: (주)스텝랩
+  legal_names:
+  - (주)스텝랩
+  former_names: []
+  search_terms:
+  - 스텝랩
+  match_terms:
+  - 스텝랩
+  - (주)스텝랩
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e191ffd8af085693
+  display_name: 스튜디오비사이드
+  source_name: (주)스튜디오비사이드
+  legal_names:
+  - (주)스튜디오비사이드
+  former_names: []
+  search_terms:
+  - 스튜디오비사이드
+  match_terms:
+  - 스튜디오비사이드
+  - (주)스튜디오비사이드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-340a829e8cf62cb0
+  display_name: 스튜디오앤뉴
+  source_name: (주)스튜디오앤뉴
+  legal_names:
+  - (주)스튜디오앤뉴
+  former_names: []
+  search_terms:
+  - 스튜디오앤뉴
+  match_terms:
+  - 스튜디오앤뉴
+  - (주)스튜디오앤뉴
+  - 넥스트엔터테인먼트월드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - NEW
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-163bb0240c671bc2
+  display_name: 스파크바이오파마
+  source_name: (주)스파크바이오파마
+  legal_names:
+  - (주)스파크바이오파마
+  former_names: []
+  search_terms:
+  - 스파크바이오파마
+  match_terms:
+  - 스파크바이오파마
+  - (주)스파크바이오파마
+  - 스파크바이오
+  - SBP-401
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-f0bc80212c49beaa
+  display_name: 스페바이오
+  source_name: (주)스페바이오
+  legal_names:
+  - (주)스페바이오
+  former_names: []
+  search_terms:
+  - 스페바이오
+  match_terms:
+  - 스페바이오
+  - (주)스페바이오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d53879da0ffa2a67
+  display_name: 스페이스린텍
+  source_name: (주)스페이스린텍
+  legal_names:
+  - (주)스페이스린텍
+  former_names: []
+  search_terms:
+  - 스페이스린텍
+  match_terms:
+  - 스페이스린텍
+  - (주)스페이스린텍
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d4d8d99a77ebbd89
+  display_name: 스페이스솔루션
+  source_name: (주)스페이스솔루션
+  legal_names:
+  - 주식회사 스페이스솔루션
+  former_names: []
+  search_terms:
+  - 스페이스솔루션
+  match_terms:
+  - 스페이스솔루션
+  - (주)스페이스솔루션
+  - 주식회사 스페이스솔루션
+  ambiguity:
+    required_context: &space_solutions_target_context
+    - 항공우주
+    - 로켓
+    - 고압 제어용밸브
+    - 고압 제어 밸브
+    - 대전
+    - 유성구
+    - 문지로
+    - spacesolutions.co.kr
+    negative_context:
+    - PIM
+    - 코넥스
+    - KONEX
+    forbidden_standalone:
+    - 스페이스솔루션
+    - (주)스페이스솔루션
+    - 주식회사 스페이스솔루션
+    required_context_for_forbidden:
+      스페이스솔루션: *space_solutions_target_context
+      (주)스페이스솔루션: *space_solutions_target_context
+      주식회사 스페이스솔루션: *space_solutions_target_context
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+  identity_metadata:
+    corporate_registry_number: 135011-0105756
+    registered_head_office: 대전광역시 유성구 문지로 229(문지동)
+    website: https://www.spacesolutions.co.kr
+    business_purposes:
+    - 항공우주(로켓)분야 고압 제어용밸브 제조 및 판매업
+    - 기계설비 공사업
+    - 무역업
+    - 부동산 임대업
+    source_document: 스페이스솔루션 등기부등본_260706(~).pdf
+- company_id: company-2c3875efca9a8101
+  display_name: 시나몬
+  source_name: (주)시나몬(구.봉봉)
+  legal_names:
+  - (주)시나몬
+  former_names:
+  - 봉봉
+  search_terms:
+  - 시나몬
+  - 봉봉
+  match_terms:
+  - 시나몬
+  - (주)시나몬
+  - 봉봉
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-6564c82f0341673a
+  display_name: 씨앗
+  source_name: (주)씨앗
+  legal_names:
+  - (주)씨앗
+  former_names: []
+  search_terms:
+  - 씨앗
+  match_terms:
+  - 씨앗
+  - (주)씨앗
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-1c5a43ca4dd1e718
+  display_name: 씨앤지마이크로웨이브
+  source_name: (주)씨앤지마이크로웨이브
+  legal_names:
+  - (주)씨앤지마이크로웨이브
+  former_names: []
+  search_terms:
+  - 씨앤지마이크로웨이브
+  match_terms:
+  - 씨앤지마이크로웨이브
+  - (주)씨앤지마이크로웨이브
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-577ec41f7ca66590
+  display_name: 씨에스오
+  source_name: (주)씨에스오
+  legal_names:
+  - (주)씨에스오
+  former_names: []
+  search_terms:
+  - 씨에스오
+  match_terms:
+  - 씨에스오
+  - (주)씨에스오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-3c6eb429a7606190
+  display_name: 아데나소프트웨어
+  source_name: (주)아데나소프트웨어
+  legal_names:
+  - (주)아데나소프트웨어
+  former_names: []
+  search_terms:
+  - 아데나소프트웨어
+  match_terms:
+  - 아데나소프트웨어
+  - (주)아데나소프트웨어
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2bf90957e9400fdf
+  display_name: 아이랩
+  source_name: (주)아이랩
+  legal_names:
+  - (주)아이랩
+  former_names: []
+  search_terms:
+  - 아이랩
+  match_terms:
+  - 아이랩
+  - (주)아이랩
+  ambiguity:
+    required_context:
+    - 류마티스
+    - 신약
+    - 임상
+    negative_context:
+    - 스마이랍
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8c6f2bba252a34b4
+  display_name: 아이바이오코리아
+  source_name: (주)아이바이오코리아
+  legal_names:
+  - (주)아이바이오코리아
+  former_names: []
+  search_terms:
+  - 아이바이오코리아
+  match_terms:
+  - 아이바이오코리아
+  - (주)아이바이오코리아
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ed6e303cc1eae0b6
+  display_name: 아이큐랩
+  source_name: (주)아이큐랩
+  legal_names:
+  - (주)아이큐랩
+  former_names: []
+  search_terms:
+  - 아이큐랩
+  match_terms:
+  - 아이큐랩
+  - (주)아이큐랩
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-9dc3e505c2e4ee90
+  display_name: 안트로젠
+  source_name: (주)안트로젠
+  legal_names:
+  - (주)안트로젠
+  former_names: []
+  search_terms:
+  - 안트로젠
+  match_terms:
+  - 안트로젠
+  - (주)안트로젠
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-1ac6efd35e83772c
+  display_name: 애거슨바이오
+  source_name: (주)애거슨바이오
+  legal_names:
+  - (주)애거슨바이오
+  former_names: []
+  search_terms:
+  - 애거슨바이오
+  match_terms:
+  - 애거슨바이오
+  - (주)애거슨바이오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d8156fc0e263257f
+  display_name: 업스테이지
+  source_name: (주)업스테이지
+  legal_names:
+  - (주)업스테이지
+  former_names: []
+  search_terms:
+  - 업스테이지
+  match_terms:
+  - 업스테이지
+  - (주)업스테이지
+  - Solar Pro
+  - Solar Open
+  - 솔라 프로
+  - 솔라 오픈
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 솔라
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-17b088c0b0bc1523
+  display_name: 에스엔이바이오
+  source_name: (주)에스엔이바이오
+  legal_names:
+  - (주)에스엔이바이오
+  former_names: []
+  search_terms:
+  - 에스엔이바이오
+  match_terms:
+  - 에스엔이바이오
+  - (주)에스엔이바이오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-6f059d214053fc31
+  display_name: 에이투시스
+  source_name: (주)에이투시스
+  legal_names:
+  - (주)에이투시스
+  former_names: []
+  search_terms:
+  - 에이투시스
+  match_terms:
+  - 에이투시스
+  - (주)에이투시스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-4ae994c6ba09244f
+  display_name: 에이펀인터렉티브
+  source_name: (주)에이펀인터렉티브
+  legal_names:
+  - (주)에이펀인터렉티브
+  former_names: []
+  search_terms:
+  - 에이펀인터렉티브
+  match_terms:
+  - 에이펀인터렉티브
+  - (주)에이펀인터렉티브
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-7c85cff34c31c818
+  display_name: 에필
+  source_name: (주)에필
+  legal_names:
+  - (주)에필
+  former_names: []
+  search_terms:
+  - 에필
+  match_terms:
+  - 에필
+  - (주)에필
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-f0a6b3d9acac70c4
+  display_name: 오아시스
+  source_name: (주)오아시스
+  legal_names:
+  - (주)오아시스
+  former_names: []
+  search_terms:
+  - 오아시스
+  match_terms:
+  - 오아시스
+  - (주)오아시스
+  - 오아시스마켓
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 오아시스
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-0affbb7bfe3c8390
+  display_name: 온힐
+  source_name: (주)온힐
+  legal_names:
+  - (주)온힐
+  former_names: []
+  search_terms:
+  - 온힐
+  match_terms:
+  - 온힐
+  - (주)온힐
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-deb50392949e5148
+  display_name: 와그
+  source_name: (주)와그
+  legal_names:
+  - (주)와그
+  former_names: []
+  search_terms:
+  - 와그
+  match_terms:
+  - 와그
+  - (주)와그
+  - WAUG
+  ambiguity:
+    required_context:
+    - 여행
+    - 액티비티
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-6cda48e13228a4a8
+  display_name: 와드
+  source_name: (주)와드
+  legal_names:
+  - (주)와드
+  former_names: []
+  search_terms:
+  - 와드
+  match_terms:
+  - 와드
+  - (주)와드
+  - 캐치테이블
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 와드
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8e3b9c2b30cb89c6
+  display_name: 원더플레이스
+  source_name: (주)원더플레이스
+  legal_names:
+  - (주)원더플레이스
+  former_names: []
+  search_terms:
+  - 원더플레이스
+  match_terms:
+  - 원더플레이스
+  - (주)원더플레이스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8720035de136844c
+  display_name: 원드롭
+  source_name: (주)원드롭
+  legal_names:
+  - (주)원드롭
+  former_names: []
+  search_terms:
+  - 원드롭
+  match_terms:
+  - 원드롭
+  - (주)원드롭
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-1dc0535db0bd0f0f
+  display_name: 웨이브일렉트로닉스
+  source_name: (주)웨이브일렉트로닉스
+  legal_names:
+  - (주)웨이브일렉트로닉스
+  former_names: []
+  search_terms:
+  - 웨이브일렉트로닉스
+  match_terms:
+  - 웨이브일렉트로닉스
+  - (주)웨이브일렉트로닉스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-b8dc4624f6b357a9
+  display_name: 웨이브피아
+  source_name: (주)웨이브피아
+  legal_names:
+  - (주)웨이브피아
+  former_names: []
+  search_terms:
+  - 웨이브피아
+  match_terms:
+  - 웨이브피아
+  - (주)웨이브피아
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-634b5b5f71a9828d
+  display_name: 위로보틱스
+  source_name: (주)위로보틱스
+  legal_names:
+  - (주)위로보틱스
+  former_names: []
+  search_terms:
+  - 위로보틱스
+  match_terms:
+  - 위로보틱스
+  - (주)위로보틱스
+  - WIM
+  - 윔
+  - 윔S
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-13f59f8e77144469
+  display_name: 위버스브레인
+  source_name: (주)위버스브레인(구,스터디맥스)
+  legal_names:
+  - (주)위버스브레인
+  former_names:
+  - 스터디맥스
+  search_terms:
+  - 위버스브레인
+  - 스터디맥스
+  match_terms:
+  - 위버스브레인
+  - (주)위버스브레인
+  - 스터디맥스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2527acf38d730993
+  display_name: 이노보테라퓨틱스
+  source_name: (주)이노보테라퓨틱스
+  legal_names:
+  - (주)이노보테라퓨틱스
+  former_names: []
+  search_terms:
+  - 이노보테라퓨틱스
+  match_terms:
+  - 이노보테라퓨틱스
+  - (주)이노보테라퓨틱스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-bd62a4c6c9fb4a26
+  display_name: 이노스페이스
+  source_name: (주)이노스페이스
+  legal_names:
+  - (주)이노스페이스
+  former_names: []
+  search_terms:
+  - 이노스페이스
+  match_terms:
+  - 이노스페이스
+  - (주)이노스페이스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-bb3f8dabd5921f7e
+  display_name: 이지템
+  source_name: (주)이지템
+  legal_names:
+  - (주)이지템
+  former_names: []
+  search_terms:
+  - 이지템
+  match_terms:
+  - 이지템
+  - (주)이지템
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d75b274eefbcc95f
+  display_name: 이터나퓨전
+  source_name: (주)이터나퓨전
+  legal_names:
+  - (주)이터나퓨전
+  former_names: []
+  search_terms:
+  - 이터나퓨전
+  match_terms:
+  - 이터나퓨전
+  - (주)이터나퓨전
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-014d1dde8851e9c6
+  display_name: 이티에스
+  source_name: (주)이티에스
+  legal_names:
+  - (주)이티에스
+  former_names: []
+  search_terms:
+  - 이티에스
+  match_terms:
+  - 이티에스
+  - (주)이티에스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-f05781d97e368447
+  display_name: 자란다
+  source_name: (주)자란다
+  legal_names:
+  - (주)자란다
+  former_names: []
+  search_terms:
+  - 자란다
+  match_terms:
+  - 자란다
+  - (주)자란다
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-189759e0f77e8fc7
+  display_name: 자이메디
+  source_name: (주)자이메디
+  legal_names:
+  - (주)자이메디
+  former_names: []
+  search_terms:
+  - 자이메디
+  match_terms:
+  - 자이메디
+  - (주)자이메디
+  - Zymedi
+  - KARS1
+  - ZMA001
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-42d68243705e77cd
+  display_name: 자이오넥스
+  source_name: (주)자이오넥스
+  legal_names:
+  - (주)자이오넥스
+  former_names: []
+  search_terms:
+  - 자이오넥스
+  match_terms:
+  - 자이오넥스
+  - (주)자이오넥스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8861d9f3036ed575
+  display_name: 지투지바이오
+  source_name: (주)지투지바이오
+  legal_names:
+  - (주)지투지바이오
+  former_names: []
+  search_terms:
+  - 지투지바이오
+  match_terms:
+  - 지투지바이오
+  - (주)지투지바이오
+  - G2GBIO
+  - G2G Bio
+  - GB-7001
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-17982a76fdaf650d
+  display_name: 지피씨알
+  source_name: (주)지피씨알
+  legal_names:
+  - (주)지피씨알
+  former_names: []
+  search_terms:
+  - 지피씨알
+  match_terms:
+  - 지피씨알
+  - (주)지피씨알
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-422a266055a970cc
+  display_name: 직방
+  source_name: (주)직방
+  legal_names:
+  - (주)직방
+  former_names: []
+  search_terms:
+  - 직방
+  match_terms:
+  - 직방
+  - (주)직방
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-944b4cc6c5121f1e
+  display_name: 캅스바이오
+  source_name: (주)캅스바이오
+  legal_names:
+  - (주)캅스바이오
+  former_names: []
+  search_terms:
+  - 캅스바이오
+  match_terms:
+  - 캅스바이오
+  - (주)캅스바이오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-17e229aa0bdeb6d1
+  display_name: 컨텍
+  source_name: (주)컨텍
+  legal_names:
+  - (주)컨텍
+  former_names: []
+  search_terms:
+  - 컨텍
+  match_terms:
+  - 컨텍
+  - (주)컨텍
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-b307ac0abc6e35cf
+  display_name: 케어메디
+  source_name: (주)케어메디
+  legal_names:
+  - (주)케어메디
+  former_names: []
+  search_terms:
+  - 케어메디
+  match_terms:
+  - 케어메디
+  - (주)케어메디
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-acbb29e69be0eeff
+  display_name: 콩스튜디오코리아
+  source_name: (주)콩스튜디오코리아
+  legal_names:
+  - (주)콩스튜디오코리아
+  former_names: []
+  search_terms:
+  - 콩스튜디오코리아
+  match_terms:
+  - 콩스튜디오코리아
+  - (주)콩스튜디오코리아
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-50ca060ed0e1b441
+  display_name: 큐노바
+  source_name: (주)큐노바
+  legal_names:
+  - (주)큐노바
+  former_names: []
+  search_terms:
+  - 큐노바
+  match_terms:
+  - 큐노바
+  - (주)큐노바
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-1e214e931395f10a
+  display_name: 큐리진
+  source_name: (주)큐리진
+  legal_names:
+  - (주)큐리진
+  former_names: []
+  search_terms:
+  - 큐리진
+  match_terms:
+  - 큐리진
+  - (주)큐리진
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-9d521ad68d05bcc0
+  display_name: 큐토프
+  source_name: (주)큐토프
+  legal_names:
+  - (주)큐토프
+  former_names: []
+  search_terms:
+  - 큐토프
+  match_terms:
+  - 큐토프
+  - (주)큐토프
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-0b3a7e48ad4e3d75
+  display_name: 큐픽스
+  source_name: (주)큐픽스
+  legal_names:
+  - (주)큐픽스
+  former_names: []
+  search_terms:
+  - 큐픽스
+  match_terms:
+  - 큐픽스
+  - (주)큐픽스
+  - Cupix
+  - CupixWorks
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-693015ecbfb3a261
+  display_name: 크몽
+  source_name: (주)크몽
+  legal_names:
+  - (주)크몽
+  former_names: []
+  search_terms:
+  - 크몽
+  match_terms:
+  - 크몽
+  - (주)크몽
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-6173aa6a4a8952c5
+  display_name: 키프라임리서치
+  source_name: (주)키프라임리서치
+  legal_names:
+  - (주)키프라임리서치
+  former_names: []
+  search_terms:
+  - 키프라임리서치
+  match_terms:
+  - 키프라임리서치
+  - (주)키프라임리서치
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-5e6928199415b87d
+  display_name: 튜링
+  source_name: (주)튜링
+  legal_names:
+  - (주)튜링
+  former_names: []
+  search_terms:
+  - 튜링
+  match_terms:
+  - 튜링
+  - (주)튜링
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d35f2bcbf0edc6c1
+  display_name: 티씨노바이오사이언스
+  source_name: (주)티씨노바이오사이언스
+  legal_names:
+  - (주)티씨노바이오사이언스
+  former_names: []
+  search_terms:
+  - 티씨노바이오사이언스
+  match_terms:
+  - 티씨노바이오사이언스
+  - (주)티씨노바이오사이언스
+  - 티씨노
+  - TXN10128
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-922bb0a3bb99daa8
+  display_name: 파로스아이바이오
+  source_name: (주)파로스아이바이오
+  legal_names:
+  - (주)파로스아이바이오
+  former_names: []
+  search_terms:
+  - 파로스아이바이오
+  match_terms:
+  - 파로스아이바이오
+  - (주)파로스아이바이오
+  - PHI-101
+  - 케미버스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-cfb14880f548426f
+  display_name: 파인더스에이아이
+  source_name: (주)파인더스에이아이
+  legal_names:
+  - (주)파인더스에이아이
+  former_names: []
+  search_terms:
+  - 파인더스에이아이
+  match_terms:
+  - 파인더스에이아이
+  - (주)파인더스에이아이
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-a241b43b8d9df61c
+  display_name: 프레이저테라퓨틱스
+  source_name: (주)프레이저테라퓨틱스
+  legal_names:
+  - (주)프레이저테라퓨틱스
+  former_names: []
+  search_terms:
+  - 프레이저테라퓨틱스
+  match_terms:
+  - 프레이저테라퓨틱스
+  - (주)프레이저테라퓨틱스
+  - 프레이저
+  - 스피뎀
+  - SPiDEM
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 프레이저
+    required_context_for_forbidden:
+    - 바이오
+    - 신약
+    - 치료제
+    - SPiDEM
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-ee79e4a1d5e15c4c
+  display_name: 프로티움사이언스
+  source_name: (주)프로티움사이언스
+  legal_names:
+  - (주)프로티움사이언스
+  former_names: []
+  search_terms:
+  - 프로티움사이언스
+  match_terms:
+  - 프로티움사이언스
+  - (주)프로티움사이언스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-80a71c0c7369353e
+  display_name: 프리모로보틱스
+  source_name: (주)프리모로보틱스(구,피엠에프)
+  legal_names:
+  - (주)프리모로보틱스
+  former_names:
+  - 피엠에프
+  search_terms:
+  - 프리모로보틱스
+  - 피엠에프
+  match_terms:
+  - 프리모로보틱스
+  - (주)프리모로보틱스
+  - 피엠에프
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-c37b5d74bf16a9b6
+  display_name: 피노바이오
+  source_name: (주)피노바이오
+  legal_names:
+  - (주)피노바이오
+  former_names: []
+  search_terms:
+  - 피노바이오
+  match_terms:
+  - 피노바이오
+  - (주)피노바이오
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-17c1a8d7126d3b2f
+  display_name: 피에스시스템
+  source_name: (주)피에스시스템(구,텔레스퀘어)
+  legal_names:
+  - (주)피에스시스템
+  former_names:
+  - 텔레스퀘어
+  search_terms:
+  - 피에스시스템
+  - 텔레스퀘어
+  match_terms:
+  - 피에스시스템
+  - (주)피에스시스템
+  - 텔레스퀘어
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-dfe2b4c182761e80
+  display_name: 피지티
+  source_name: (주)피지티(구,프로그린테크)
+  legal_names:
+  - (주)피지티
+  former_names:
+  - 프로그린테크
+  search_terms:
+  - 피지티
+  - 프로그린테크
+  match_terms:
+  - 피지티
+  - (주)피지티
+  - 프로그린테크
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 피지티
+    required_context_for_forbidden:
+    - 이차전지
+    - 전해질
+    - 프로그린테크
+    - 코스닥
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-fee12134e09eb64a
+  display_name: 핀테라퓨틱스
+  source_name: (주)핀테라퓨틱스
+  legal_names:
+  - (주)핀테라퓨틱스
+  former_names: []
+  search_terms:
+  - 핀테라퓨틱스
+  match_terms:
+  - 핀테라퓨틱스
+  - (주)핀테라퓨틱스
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-6ee2786ed86b5577
+  display_name: 하이드로엑스팬드
+  source_name: (주)하이드로엑스팬드
+  legal_names:
+  - (주)하이드로엑스팬드
+  former_names: []
+  search_terms:
+  - 하이드로엑스팬드
+  match_terms:
+  - 하이드로엑스팬드
+  - (주)하이드로엑스팬드
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-bdcd7dadb8a6ee88
+  display_name: 하이퍼엑셀
+  source_name: (주)하이퍼엑셀
+  legal_names:
+  - (주)하이퍼엑셀
+  former_names: []
+  search_terms:
+  - 하이퍼엑셀
+  match_terms:
+  - 하이퍼엑셀
+  - (주)하이퍼엑셀
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2404a0e97d4122d6
+  display_name: 히츠
+  source_name: (주)히츠
+  legal_names:
+  - (주)히츠
+  former_names: []
+  search_terms:
+  - 히츠
+  match_terms:
+  - 히츠
+  - (주)히츠
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-39d6af463ad366e7
+  display_name: 힐링페이퍼
+  source_name: (주)힐링페이퍼
+  legal_names:
+  - (주)힐링페이퍼
+  former_names: []
+  search_terms:
+  - 힐링페이퍼
+  match_terms:
+  - 힐링페이퍼
+  - (주)힐링페이퍼
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-617d1c729f6d8fef
+  display_name: Breeze Bio
+  source_name: Breeze Bio, Inc.(구, GenEdit, Inc.)
+  legal_names:
+  - Breeze Bio, Inc.
+  former_names:
+  - GenEdit, Inc.
+  search_terms:
+  - Breeze Bio
+  - GenEdit
+  match_terms:
+  - Breeze Bio
+  - Breeze Bio, Inc.
+  - GenEdit
+  - GenEdit, Inc.
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-7aac7552bec963bc
+  display_name: Infinitesima
+  source_name: Infinitesima Limited
+  legal_names:
+  - Infinitesima Limited
+  former_names: []
+  search_terms:
+  - Infinitesima
+  match_terms:
+  - Infinitesima
+  - Infinitesima Limited
+  - 인피니티시마
+  - Metron3D
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-9935c2c09f8afe63
+  display_name: KaliVir Immunotherapeutics
+  source_name: KaliVir Immunotherapeutics, Inc.
+  legal_names:
+  - KaliVir Immunotherapeutics, Inc.
+  former_names: []
+  search_terms:
+  - KaliVir Immunotherapeutics
+  match_terms:
+  - KaliVir Immunotherapeutics
+  - KaliVir Immunotherapeutics, Inc.
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-514d42808e6f3a8a
+  display_name: Katalyst Space Holdings
+  source_name: Katalyst Space Holdings, Inc.
+  legal_names:
+  - Katalyst Space Holdings, Inc.
+  former_names: []
+  search_terms:
+  - Katalyst Space Holdings
+  match_terms:
+  - Katalyst Space Holdings
+  - Katalyst Space Holdings, Inc.
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-85ff29dcf8259004
+  display_name: MPN Marketplace Networks
+  source_name: MPN Marketplace Networks Gmbh
+  legal_names:
+  - MPN Marketplace Networks Gmbh
+  former_names: []
+  search_terms:
+  - MPN Marketplace Networks
+  match_terms:
+  - MPN Marketplace Networks
+  - MPN Marketplace Networks Gmbh
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-5294575d5169a4f0
+  display_name: Noah's Farm
+  source_name: Noah's Farm Pte.Ltd.
+  legal_names:
+  - Noah's Farm Pte.Ltd.
+  former_names: []
+  search_terms:
+  - Noah's Farm
+  match_terms:
+  - Noah's Farm
+  - Noah's Farm Pte.Ltd.
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-de8c92603683b886
+  display_name: PORTONE HOLDINGS
+  source_name: PORTONE HOLDINGS PTE. LTD.
+  legal_names:
+  - PORTONE HOLDINGS PTE. LTD.
+  former_names: []
+  search_terms:
+  - PORTONE HOLDINGS
+  match_terms:
+  - PORTONE HOLDINGS
+  - PORTONE HOLDINGS PTE. LTD.
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d85834f3b39ad755
+  display_name: 관악아날로그
+  source_name: 관악아날로그(주)
+  legal_names:
+  - 관악아날로그(주)
+  former_names: []
+  search_terms:
+  - 관악아날로그
+  match_terms:
+  - 관악아날로그
+  - 관악아날로그(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e2b8fc4f7b436cc7
+  display_name: 네오사피엔스
+  source_name: 네오사피엔스(주)
+  legal_names:
+  - 네오사피엔스(주)
+  former_names: []
+  search_terms:
+  - 네오사피엔스
+  match_terms:
+  - 네오사피엔스
+  - 네오사피엔스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-55a979843a8e813e
+  display_name: 노보렉스
+  source_name: 노보렉스(주)
+  legal_names:
+  - 노보렉스(주)
+  former_names: []
+  search_terms:
+  - 노보렉스
+  match_terms:
+  - 노보렉스
+  - 노보렉스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2cc4eb83cf74331b
+  display_name: 다임리서치
+  source_name: 다임리서치(주)
+  legal_names:
+  - 다임리서치(주)
+  former_names: []
+  search_terms:
+  - 다임리서치
+  match_terms:
+  - 다임리서치
+  - 다임리서치(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-06db19bf8f1a6da5
+  display_name: 더핑크퐁컴퍼니
+  source_name: 더핑크퐁컴퍼니(주)
+  legal_names:
+  - 더핑크퐁컴퍼니(주)
+  former_names: []
+  search_terms:
+  - 더핑크퐁컴퍼니
+  match_terms:
+  - 더핑크퐁컴퍼니
+  - 더핑크퐁컴퍼니(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-43a6dce4b8e74576
+  display_name: 디앤알티
+  source_name: 디앤알티(주)
+  legal_names:
+  - 디앤알티(주)
+  former_names: []
+  search_terms:
+  - 디앤알티
+  match_terms:
+  - 디앤알티
+  - 디앤알티(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-9fee1acf6cd8072c
+  display_name: 루미르
+  source_name: 루미르(주)
+  legal_names:
+  - 루미르(주)
+  former_names: []
+  search_terms:
+  - 루미르
+  match_terms:
+  - 루미르
+  - 루미르(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-4aaaec86c0e40973
+  display_name: 리디
+  source_name: 리디(주)
+  legal_names:
+  - 리디(주)
+  former_names: []
+  search_terms:
+  - 리디
+  match_terms:
+  - 리디
+  - 리디(주)
+  - 리디북스
+  - RIDI
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 리디아
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e89dd58f35c7fca5
+  display_name: 매니코어소프트
+  source_name: 매니코어소프트(주)
+  legal_names:
+  - 매니코어소프트(주)
+  former_names: []
+  search_terms:
+  - 매니코어소프트
+  match_terms:
+  - 매니코어소프트
+  - 매니코어소프트(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-cf1a64e345597f60
+  display_name: 바이오디자인랩
+  source_name: 바이오디자인랩(주)
+  legal_names:
+  - 바이오디자인랩(주)
+  former_names: []
+  search_terms:
+  - 바이오디자인랩
+  match_terms:
+  - 바이오디자인랩
+  - 바이오디자인랩(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-757b6d369317f98d
+  display_name: 셀렉트스타
+  source_name: 셀렉트스타(주)
+  legal_names:
+  - 셀렉트스타(주)
+  former_names: []
+  search_terms:
+  - 셀렉트스타
+  match_terms:
+  - 셀렉트스타
+  - 셀렉트스타(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-81d7009aff95996c
+  display_name: 소바젠
+  source_name: 소바젠(주)
+  legal_names:
+  - 소바젠(주)
+  former_names: []
+  search_terms:
+  - 소바젠
+  match_terms:
+  - 소바젠
+  - 소바젠(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-9615a070f8980fff
+  display_name: 심플렉스
+  source_name: 심플렉스(주)
+  legal_names:
+  - 심플렉스(주)
+  former_names: []
+  search_terms:
+  - 심플렉스
+  match_terms:
+  - 심플렉스
+  - 심플렉스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-a9b1c0035a44c479
+  display_name: 아이빔테크놀로지
+  source_name: 아이빔테크놀로지(주)
+  legal_names:
+  - 아이빔테크놀로지(주)
+  former_names: []
+  search_terms:
+  - 아이빔테크놀로지
+  match_terms:
+  - 아이빔테크놀로지
+  - 아이빔테크놀로지(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-739f688186889107
+  display_name: 아큐옵토텍
+  source_name: 아큐옵토텍
+  legal_names:
+  - 아큐옵토텍
+  former_names: []
+  search_terms:
+  - 아큐옵토텍
+  match_terms:
+  - 아큐옵토텍
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2cdebb47ed3f2168
+  display_name: 알고케어
+  source_name: 알고케어(주)
+  legal_names:
+  - 알고케어(주)
+  former_names: []
+  search_terms:
+  - 알고케어
+  match_terms:
+  - 알고케어
+  - 알고케어(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-116377e72c14f934
+  display_name: 알엑스
+  source_name: 알엑스(주)
+  legal_names:
+  - 알엑스(주)
+  former_names: []
+  search_terms:
+  - 알엑스
+  match_terms:
+  - 알엑스
+  - 알엑스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8214dbdacbe577fe
+  display_name: 에이비엘바이오
+  source_name: 에이비엘바이오(주)
+  legal_names:
+  - 에이비엘바이오(주)
+  former_names: []
+  search_terms:
+  - 에이비엘바이오
+  match_terms:
+  - 에이비엘바이오
+  - 에이비엘바이오(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-0038f651abfbe815
+  display_name: 엑시나
+  source_name: 엑시나(주)
+  legal_names:
+  - 엑시나(주)
+  former_names: []
+  search_terms:
+  - 엑시나
+  match_terms:
+  - 엑시나
+  - 엑시나(주)
+  - XCENA
+  - MetisX
+  - MX1
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 엑시콘
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-873678220a21515b
+  display_name: 오름테라퓨틱
+  source_name: 오름테라퓨틱(주)
+  legal_names:
+  - 오름테라퓨틱(주)
+  former_names: []
+  search_terms:
+  - 오름테라퓨틱
+  match_terms:
+  - 오름테라퓨틱
+  - 오름테라퓨틱(주)
+  - Orum Therapeutics
+  - ORM-1153
+  - ORM-5029
+  - ORM-6151
+  - ORM-2152
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone:
+    - 오름
+    required_context_for_forbidden:
+    - 바이오
+    - 신약
+    - 치료제
+    - 항암
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-a9d41228cf281fc7
+  display_name: 올릭스
+  source_name: 올릭스(주)
+  legal_names:
+  - 올릭스(주)
+  former_names: []
+  search_terms:
+  - 올릭스
+  match_terms:
+  - 올릭스
+  - 올릭스(주)
+  - OliX Pharmaceuticals
+  - OLX702A
+  - OLX-702A
+  - OLX104C
+  - OLX-104C
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context:
+    - chip
+    - semiconductor
+    - data center
+    - datacenter
+    - Dacombe
+    - UK startup
+    - sovereign AI
+    - inference
+    - photonic
+    - HBM
+    - Arm Holdings
+    - classifieds
+    - marketplace
+    english_required_context_for_short_form:
+      Olix:
+      - RNAi
+      - siRNA
+      - GalNAc
+      - therapeutics
+      - pharmaceutical
+      - KOSDAQ
+      - MASH
+      - Lilly
+      - OLX702A
+      - OLX75016
+      - '226950'
+      - Dong-ki Lee
+- company_id: company-3a7ed63f56607b73
+  display_name: 윌코
+  source_name: 윌코(주)
+  legal_names:
+  - 윌코(주)
+  former_names: []
+  search_terms:
+  - 윌코
+  match_terms:
+  - 윌코
+  - 윌코(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-1e324bfe285602d1
+  display_name: 이노레이
+  source_name: 이노레이(주)
+  legal_names:
+  - 이노레이(주)
+  former_names: []
+  search_terms:
+  - 이노레이
+  match_terms:
+  - 이노레이
+  - 이노레이(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e492c589b9fef781
+  display_name: 이마고웍스
+  source_name: 이마고웍스(주)
+  legal_names:
+  - 이마고웍스(주)
+  former_names: []
+  search_terms:
+  - 이마고웍스
+  match_terms:
+  - 이마고웍스
+  - 이마고웍스(주)
+  - 덴트버드
+  - Dentbird
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-122aba637f506111
+  display_name: 이뮤노바이옴
+  source_name: 이뮤노바이옴(주)
+  legal_names:
+  - 이뮤노바이옴(주)
+  former_names: []
+  search_terms:
+  - 이뮤노바이옴
+  match_terms:
+  - 이뮤노바이옴
+  - 이뮤노바이옴(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-5a2d736500c9f0e4
+  display_name: 이뮤노포지
+  source_name: 이뮤노포지(주)
+  legal_names:
+  - 이뮤노포지(주)
+  former_names: []
+  search_terms:
+  - 이뮤노포지
+  match_terms:
+  - 이뮤노포지
+  - 이뮤노포지(주)
+  - PF1804
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-2985daf63738c662
+  display_name: 인터그래비티테크놀로지스
+  source_name: 인터그래비티테크놀로지스(주)
+  legal_names:
+  - 인터그래비티테크놀로지스(주)
+  former_names: []
+  search_terms:
+  - 인터그래비티테크놀로지스
+  match_terms:
+  - 인터그래비티테크놀로지스
+  - 인터그래비티테크놀로지스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-093f35e08d30942b
+  display_name: 인텔릭스
+  source_name: 인텔릭스(주)
+  legal_names:
+  - 인텔릭스(주)
+  former_names: []
+  search_terms:
+  - 인텔릭스
+  match_terms:
+  - 인텔릭스
+  - 인텔릭스(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-476d05f7c53740a2
+  display_name: 일리미스테라퓨틱스
+  source_name: 일리미스테라퓨틱스
+  legal_names:
+  - 일리미스테라퓨틱스
+  former_names: []
+  search_terms:
+  - 일리미스테라퓨틱스
+  match_terms:
+  - 일리미스테라퓨틱스
+  - 일리미스
+  - GAIA
+  - 가이아
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden:
+      가이아:
+      - 바이오
+      - 치료제
+      - 신약
+      GAIA:
+      - 바이오
+      - 치료제
+      - 신약
+      - 알츠하이머
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-449bddb65152e06b
+  display_name: 제이투에이치바이오텍
+  source_name: 제이투에이치바이오텍(주)
+  legal_names:
+  - 제이투에이치바이오텍(주)
+  former_names: []
+  search_terms:
+  - 제이투에이치바이오텍
+  match_terms:
+  - 제이투에이치바이오텍
+  - 제이투에이치바이오텍(주)
+  - 제이투에이치
+  - J2H
+  - J2H-1702
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 제이투케이바이오
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-f10dbbd123585ab1
+  display_name: 로토토베베
+  source_name: 주식회사 로토토베베
+  legal_names:
+  - 주식회사 로토토베베
+  former_names: []
+  search_terms:
+  - 로토토베베
+  match_terms:
+  - 로토토베베
+  - 주식회사 로토토베베
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-820fdc5e1fb78898
+  display_name: 지니너스
+  source_name: 지니너스(주)
+  legal_names:
+  - 지니너스(주)
+  former_names: []
+  search_terms:
+  - 지니너스
+  match_terms:
+  - 지니너스
+  - 지니너스(주)
+  ambiguity:
+    required_context: []
+    negative_context:
+    - 지니뮤직
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-026af4508639aecf
+  display_name: 카테노이드
+  source_name: 카테노이드(주)
+  legal_names:
+  - 카테노이드(주)
+  former_names: []
+  search_terms:
+  - 카테노이드
+  match_terms:
+  - 카테노이드
+  - 카테노이드(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-720755986077a004
+  display_name: 코모토
+  source_name: 코모토(주)
+  legal_names:
+  - 코모토(주)
+  former_names: []
+  search_terms:
+  - 코모토
+  match_terms:
+  - 코모토
+  - 코모토(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e8af1c52e222b692
+  display_name: 코스모비
+  source_name: 코스모비(주)
+  legal_names:
+  - 코스모비(주)
+  former_names: []
+  search_terms:
+  - 코스모비
+  match_terms:
+  - 코스모비
+  - 코스모비(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-e8402b5f2109bc0a
+  display_name: 티쎌로지
+  source_name: 티쎌로지(주)
+  legal_names:
+  - 티쎌로지(주)
+  former_names: []
+  search_terms:
+  - 티쎌로지
+  match_terms:
+  - 티쎌로지
+  - 티쎌로지(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-8e7c667dbbac84ed
+  display_name: 티와이
+  source_name: 티와이(주)(구, 티와이파우들러(주))
+  legal_names:
+  - 티와이(주)
+  former_names:
+  - 티와이파우들러(주)
+  search_terms:
+  - 티와이
+  - 티와이파우들러
+  match_terms:
+  - 티와이
+  - 티와이(주)
+  - 티와이파우들러
+  - 티와이파우들러(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-3e9b7e55c4cf137c
+  display_name: 퓨어만
+  source_name: 퓨어만(주)
+  legal_names:
+  - 퓨어만(주)
+  former_names: []
+  search_terms:
+  - 퓨어만
+  match_terms:
+  - 퓨어만
+  - 퓨어만(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}
+- company_id: company-d223c69fba21b139
+  display_name: 프로메디젠
+  source_name: 프로메디젠(주)
+  legal_names:
+  - 프로메디젠(주)
+  former_names: []
+  search_terms:
+  - 프로메디젠
+  match_terms:
+  - 프로메디젠
+  - 프로메디젠(주)
+  ambiguity:
+    required_context: []
+    negative_context: []
+    forbidden_standalone: []
+    required_context_for_forbidden: {}
+    english_negative_context: []
+    english_required_context_for_short_form: {}

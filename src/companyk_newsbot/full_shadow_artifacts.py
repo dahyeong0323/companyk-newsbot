@@ -22,8 +22,14 @@ def _article(article: Any) -> dict[str, Any]:
         "article_id": article_id(article),
         "title": article.title,
         "source": article.source,
+        "source_type": article.source_type,
         "url": article.canonical_url,
         "published_at": article.published_at.isoformat() if article.published_at else None,
+        "retrieved_at": article.retrieved_at.isoformat(),
+        "description": article.description,
+        "text": article.text,
+        "language": article.language,
+        "origin_metadata": article.origin_metadata,
     }
 
 
@@ -264,10 +270,17 @@ class FullShadowArtifactJournal:
         self.payload["artifact_updated_at"] = datetime.now(UTC).isoformat()
         self._persist()
 
-    def complete(self, payload: dict[str, Any], html: str) -> tuple[str, str]:
-        payload["run_status"] = "success"
+    def complete(
+        self,
+        payload: dict[str, Any],
+        html: str,
+        *,
+        run_status: str = "success",
+        reason: str | None = None,
+    ) -> tuple[str, str]:
+        payload["run_status"] = run_status
         payload["last_completed_stage"] = "complete"
-        payload["fatal_error"] = None
+        payload["fatal_error"] = reason
         payload["failed_item_ids"] = []
         payload["artifact_updated_at"] = datetime.now(UTC).isoformat()
         payload["debug"]["journal_stages"] = self.payload["stages"]
@@ -292,7 +305,11 @@ def write_full_shadow_artifacts(
     route_b_events: list[ExternalEventCluster],
     judged: list[JudgedRouteBCandidate],
     prefilter_rejections: Iterable[RouteBRejection],
+    shadow_delivery_id: str | None = None,
     journal: FullShadowArtifactJournal | None = None,
+    debug_extra: dict[str, Any] | None = None,
+    run_status: str = "success",
+    status_reason: str | None = None,
 ) -> tuple[str, str]:
     """Persist review data separately from the recipient-facing rendered email."""
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -308,7 +325,11 @@ def write_full_shadow_artifacts(
             "metrics": metrics,
             "safety": {
                 "email_sent": False,
-                "resend_called": False,
+                "delivered": False,
+                "resend_called": shadow_delivery_id is not None,
+                "production_email_sent": False,
+                "shadow_test_email_sent": shadow_delivery_id is not None,
+                "shadow_test_delivery_id": shadow_delivery_id,
                 "production_delivery_checkpoint_before": delivery_checkpoint_before,
                 "production_delivery_checkpoint_advanced_by_run": False,
             },
@@ -323,6 +344,7 @@ def write_full_shadow_artifacts(
                 ],
             },
             "openai_usage": "not_measured_by_current_sdk_wrapper",
+            **(debug_extra or {}),
         },
     }
-    return journal.complete(payload, rendered.html)
+    return journal.complete(payload, rendered.html, run_status=run_status, reason=status_reason)
