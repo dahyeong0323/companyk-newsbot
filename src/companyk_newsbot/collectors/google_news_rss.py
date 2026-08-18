@@ -224,8 +224,8 @@ class GoogleNewsRSSCollector:
         *,
         client: httpx.AsyncClient | None = None,
         now: Callable[[], datetime] | None = None,
-        language: str = "en-US",
-        country: str = "US",
+        language: str = "ko-KR",
+        country: str = "KR",
         settings: RSSCollectorSettings | None = None,
         freshness_hint: str | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
@@ -289,7 +289,13 @@ class GoogleNewsRSSCollector:
         if not query:
             raise ValueError("Google News RSS query must not be blank")
         runtime_query = f"{query} {self.freshness_hint}" if self.freshness_hint else query
-        params = {"q": runtime_query, "hl": self.language, "gl": self.country, "ceid": f"{self.country}:en"}
+        edition_language = self.language.split("-", 1)[0].casefold()
+        params = {
+            "q": runtime_query,
+            "hl": self.language,
+            "gl": self.country,
+            "ceid": f"{self.country}:{edition_language}",
+        }
         retry_after_used = 0
         for attempt_index in range(self.settings.max_retries + 1):
             attempts = attempt_index + 1

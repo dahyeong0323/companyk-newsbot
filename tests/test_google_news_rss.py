@@ -71,6 +71,46 @@ def test_runtime_freshness_hint_is_sent_without_changing_base_query_metadata(hin
     assert articles[0].origin_metadata["query"] == "Example Co"
 
 
+def test_default_korean_edition_is_used_for_portfolio_news_queries() -> None:
+    observed = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(request.url.params)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client)
+        try:
+            await collector.collect("오아시스마켓")
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+    assert observed["hl"] == "ko-KR"
+    assert observed["gl"] == "KR"
+    assert observed["ceid"] == "KR:ko"
+
+
+def test_explicit_non_korean_edition_derives_a_matching_ceid() -> None:
+    observed = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed.update(request.url.params)
+        return httpx.Response(200, content=RSS_BODY, request=request)
+
+    async def run() -> None:
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        collector = GoogleNewsRSSCollector(client=client, language="en-US", country="US")
+        try:
+            await collector.collect("Example Co")
+        finally:
+            await client.aclose()
+
+    asyncio.run(run())
+    assert observed["ceid"] == "US:en"
+
+
 def test_collect_rejects_blank_query() -> None:
     with pytest.raises(ValueError, match="must not be blank"):
         asyncio.run(collector_for(RSS_BODY).collect("  "))
@@ -470,4 +510,4 @@ def test_collector_sends_stable_request_headers() -> None:
     asyncio.run(run())
     assert observed["user-agent"].startswith("CompanyK-Newsbot/")
     assert "application/rss+xml" in observed["accept"]
-    assert observed["accept-language"].startswith("en-US")
+    assert observed["accept-language"].startswith("ko-KR")
