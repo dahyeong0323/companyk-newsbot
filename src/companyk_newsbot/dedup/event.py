@@ -16,6 +16,13 @@ from companyk_newsbot.rules import RouteAMatch
 
 EventDecision = Literal["SAME_EVENT", "DIFFERENT_EVENT", "AMBIGUOUS"]
 
+# These terms describe article presentation or a generic event action rather
+# than the named object that distinguishes one company event from another.
+_GENERIC_SUBJECT_TERMS = frozenset({
+    "co", "kr", "com", "net", "뉴스", "일", "발사", "시험", "시험비행", "추진",
+    "첫", "새벽", "마쳐", "도전", "리허설", "발표", "관련", "소식", "업데이트",
+})
+
 
 def article_id(article: Article) -> str:
     raw = f"{article.canonical_url.strip().casefold()}|{normalized_title(article.title)}|{article.published_at}"
@@ -79,6 +86,7 @@ def deterministic_pair_decision(
     left_anchors: EventAnchors,
     right_anchors: EventAnchors,
     event_window: timedelta,
+    company: str | None = None,
 ) -> tuple[EventDecision, str]:
     if left.published_at and right.published_at and abs(left.published_at - right.published_at) > event_window:
         return "DIFFERENT_EVENT", "publication_window_conflict"
@@ -89,6 +97,24 @@ def deterministic_pair_decision(
         return "SAME_EVENT", "exact_normalized_title"
     left_title, right_title = normalized_title(left.title), normalized_title(right.title)
     ratio = SequenceMatcher(None, left_title, right_title).ratio()
+    company_terms = set(normalized_title(company or "").split())
+    left_distinctive_subjects = {
+        term for term in left_anchors.subject_terms
+        if len(term) > 1 and term not in _GENERIC_SUBJECT_TERMS and term not in company_terms
+    }
+    right_distinctive_subjects = {
+        term for term in right_anchors.subject_terms
+        if len(term) > 1 and term not in _GENERIC_SUBJECT_TERMS and term not in company_terms
+    }
+    if (
+        company
+        and left_anchors.explicit_date_tokens == right_anchors.explicit_date_tokens
+        and left_anchors.explicit_date_tokens
+        and left_distinctive_subjects
+        and right_distinctive_subjects
+        and left_distinctive_subjects.isdisjoint(right_distinctive_subjects)
+    ):
+        return "DIFFERENT_EVENT", "named_subject_conflict_on_shared_date"
     if left_anchors.has_partial_distinctive_mismatch(right_anchors):
         return "AMBIGUOUS", "partial_distinctive_anchor_mismatch"
     identity_categories = left_anchors.shared_identity_categories(right_anchors)
@@ -101,12 +127,18 @@ def deterministic_pair_decision(
         left_anchors.milestone_terms
         and left_anchors.milestone_terms == right_anchors.milestone_terms
     )
+    distinctive_subject_overlap = {
+        term for term in subject_overlap
+        if len(term) > 1 and term not in _GENERIC_SUBJECT_TERMS and term not in company_terms
+    }
     if ratio >= 0.92 and identity_categories and subject_overlap:
         return "SAME_EVENT", "high_title_similarity_with_distinctive_anchor"
     if len(identity_categories) >= 2 and primary_action_shared and subject_overlap:
         return "SAME_EVENT", "multiple_canonical_identity_anchors"
     if identity_categories and primary_action_shared and milestone_shared and subject_overlap:
         return "SAME_EVENT", "canonical_identity_action_milestone_combination"
+    if company and "date" in identity_categories and distinctive_subject_overlap:
+        return "SAME_EVENT", "shared_scheduled_date_and_named_subject"
     return "AMBIGUOUS", "insufficient_distinctive_event_identity"
 
 
@@ -126,7 +158,7 @@ class RouteAEventClusterer:
             for members, audits in groups:
                 if members[0].company != match.company:
                     continue
-                pair_audits = [self._pair(existing.article, match.article) for existing in members]
+                pair_audits = [self._pair(existing.article, match.article, company=members[0].company) for existing in members]
                 if all(audit.final_decision == "SAME_EVENT" for audit in pair_audits):
                     members.append(match)
                     audits.extend((*rejected_audits, *pair_audits))
@@ -136,12 +168,13 @@ class RouteAEventClusterer:
                 groups.append(([match], rejected_audits))
         return [self._event(members, audits) for members, audits in groups]
 
-    def _pair(self, left: Article, right: Article) -> PairDecision:
+    def _pair(self, left: Article, right: Article, *, company: str) -> PairDecision:
         deterministic, reason = deterministic_pair_decision(
             left, right,
             left_anchors=EventAnchors.from_article(left),
             right_anchors=EventAnchors.from_article(right),
             event_window=self.event_window,
+            company=company,
         )
         if deterministic == "SAME_EVENT": self.metrics.deterministic_same_event += 1
         elif deterministic == "DIFFERENT_EVENT": self.metrics.deterministic_different_event += 1

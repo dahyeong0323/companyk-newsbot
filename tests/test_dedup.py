@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from companyk_newsbot.dedup import ArticleDeduplicator, RouteAEventClusterer
+from companyk_newsbot.dedup import ArticleDeduplicator, EventAnchors, RouteAEventClusterer
 from companyk_newsbot.models import Article
 from companyk_newsbot.rules import RouteAMatch
 
@@ -94,3 +94,56 @@ def test_event_cluster_keeps_conflicting_amounts_and_companies_separate() -> Non
     clusters = RouteAEventClusterer().cluster(matches)
 
     assert len(clusters) == 3
+
+
+def test_event_cluster_merges_same_company_named_subject_and_korean_scheduled_day() -> None:
+    first = match(
+        "이노스페이스",
+        "이노스페이스 준궤도 로켓 '세빛', 20일 첫 시험비행 도전",
+        "https://nate.example/sebit",
+        published_at=datetime(2026, 8, 18, 0, 18, tzinfo=UTC),
+    )
+    second = match(
+        "이노스페이스",
+        "이노스페이스 '세빛' 발사 리허설 마쳐···20일 새벽 발사 추진",
+        "https://edaily.example/sebit",
+        published_at=datetime(2026, 8, 18, 0, 28, tzinfo=UTC),
+    )
+
+    clusters = RouteAEventClusterer().cluster([first, second])
+
+    assert len(clusters) == 1
+    assert clusters[0].coverage_count == 2
+    assert any(decision.deterministic_reason == "shared_scheduled_date_and_named_subject" for decision in clusters[0].dedup_decisions)
+
+
+def test_event_cluster_does_not_merge_same_company_different_named_subjects_on_same_day() -> None:
+    first = match(
+        "이노스페이스",
+        "이노스페이스 '세빛', 20일 첫 시험비행 도전",
+        "https://example.com/sebit",
+        published_at=datetime(2026, 8, 18, tzinfo=UTC),
+    )
+    second = match(
+        "이노스페이스",
+        "이노스페이스 '한빛', 20일 첫 시험비행 도전",
+        "https://example.com/hanbit",
+        published_at=datetime(2026, 8, 18, 1, tzinfo=UTC),
+    )
+
+    clusters = RouteAEventClusterer().cluster([first, second])
+
+    assert len(clusters) == 2
+
+
+def test_aerospace_test_flight_is_not_classified_as_a_clinical_trial() -> None:
+    value = article(
+        "이노스페이스 준궤도 로켓 세빛, 20일 첫 시험비행 도전",
+        "https://example.com/sebit-flight",
+        published_at=datetime(2026, 8, 18, tzinfo=UTC),
+    )
+
+    anchors = EventAnchors.from_article(value)
+
+    assert anchors.explicit_date_tokens == frozenset({"2026-08-20"})
+    assert "clinical_trial" not in anchors.action_terms

@@ -54,6 +54,7 @@ _KO_FINAL_MEMBER = re.compile(r"([가-힣A-Za-z0-9.&-]{2,30})(?:와|과)?\s*(?=(
 
 _ISO_DATE = re.compile(r"\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
 _KO_DATE = re.compile(r"\b(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일\b")
+_KO_DAY_OF_MONTH = re.compile(r"(?<!\d)([1-9]|[12]\d|3[01])일(?=\s|$|[,.…'\"])")
 _MONTH_DATE = re.compile(
     r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b",
     re.I,
@@ -157,7 +158,7 @@ def _percentages(text: str) -> frozenset[str]:
     return frozenset(values)
 
 
-def _dates(text: str) -> frozenset[str]:
+def _dates(text: str, *, reference_date: date | None = None) -> frozenset[str]:
     values: set[str] = set()
     candidates: list[tuple[int, int, int]] = []
     candidates.extend((int(match.group(1)), int(match.group(2)), int(match.group(3))) for match in _ISO_DATE.finditer(text))
@@ -168,6 +169,29 @@ def _dates(text: str) -> frozenset[str]:
             values.add(date(year, month, day).isoformat())
         except ValueError:
             continue
+    # Korean headlines commonly use a day-of-month without the year/month
+    # (for example, "20일 첫 시험비행"). Resolve only a nearby date relative
+    # to the article publication date; distant dates are too ambiguous to use
+    # as a deduplication identity anchor.
+    if reference_date is not None:
+        for match in _KO_DAY_OF_MONTH.finditer(text):
+            day = int(match.group(1))
+            candidates = []
+            for month_offset in (-1, 0, 1):
+                month = reference_date.month + month_offset
+                year = reference_date.year
+                if month < 1:
+                    year, month = year - 1, month + 12
+                elif month > 12:
+                    year, month = year + 1, month - 12
+                try:
+                    candidates.append(date(year, month, day))
+                except ValueError:
+                    continue
+            if candidates:
+                resolved = min(candidates, key=lambda value: abs((value - reference_date).days))
+                if abs((resolved - reference_date).days) <= 14:
+                    values.add(resolved.isoformat())
     return frozenset(values)
 
 
@@ -190,7 +214,13 @@ class EventAnchors:
         text = "\n".join(part for part in (article.title, article.description, article.text) if part)
         ordered_actions = _ordered_hits(article.title, _ACTION_TERMS)
         all_actions = tuple(dict.fromkeys((*ordered_actions, *_ordered_hits(text, _ACTION_TERMS))))
-        primary = frozenset(ordered_actions[:1] or all_actions[:1])
+        # "시험" in aerospace reporting means a flight/test launch, not a
+        # clinical trial. Treating it as the latter creates a false action
+        # identity and prevents otherwise identical launch coverage merging.
+        aerospace_context = any(term in text for term in ("로켓", "발사", "우주", "준궤도", "위성", "시험비행"))
+        if aerospace_context:
+            all_actions = tuple(action for action in all_actions if action != "clinical_trial")
+        primary = frozenset(all_actions[:1])
         secondary = frozenset(action for action in all_actions if action not in primary)
         actions = frozenset(all_actions)
         milestones = frozenset(_ordered_hits(article.title, _MILESTONE_TERMS))
@@ -202,7 +232,7 @@ class EventAnchors:
             secondary_action_terms=secondary,
             counterparties=_counterparties(article.title),
             milestone_terms=milestones,
-            explicit_date_tokens=_dates(text),
+            explicit_date_tokens=_dates(text, reference_date=article.published_at.date() if article.published_at else None),
             numeric_tokens=frozenset(_NUMBER.findall(_normalized_phrase(text))),
             amount_tokens=_amounts(text),
             percentage_tokens=_percentages(text),
