@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
+from companyk_newsbot.freshness import delivery_window, filter_articles, rss_freshness_hint, smoke_window
 from companyk_newsbot.models import Article
 
 
@@ -62,3 +62,15 @@ def test_smoke_accepts_full_seven_day_window_across_kst_dates() -> None:
 
     assert window.mode == "smoke_7d"
     assert len(result.accepted) == 1
+
+
+def test_rss_hint_expands_after_a_delivery_outage_without_exceeding_cap() -> None:
+    window = delivery_window(
+        now=NOW,
+        last_successful_delivery_run=NOW - timedelta(days=4),
+        overlap_hours=2,
+        first_run_hours=30,
+    )
+
+    assert rss_freshness_hint(window) == "when:5d"
+    assert rss_freshness_hint(window, maximum_days=3) == "when:3d"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Iterable, Literal
 
 from companyk_newsbot.models import Article
@@ -62,6 +63,19 @@ def delivery_window(
     else:
         start = utc_datetime(last_successful_delivery_run) - timedelta(hours=overlap_hours)
     return FreshnessWindow("since_last_successful_run", start, end)
+
+
+def rss_freshness_hint(window: FreshnessWindow, *, maximum_days: int = 7) -> str:
+    """Return a Google News `when:` hint that covers the full delivery window.
+
+    The local timestamp filter remains authoritative.  This hint only prevents
+    Google News from silently excluding the beginning of a long outage gap.
+    """
+    if maximum_days < 1:
+        raise ValueError("maximum RSS lookback days must be positive")
+    seconds = max(0.0, (window.end - window.start).total_seconds())
+    days = max(1, ceil(seconds / timedelta(days=1).total_seconds()))
+    return f"when:{min(days, maximum_days)}d"
 
 
 def filter_articles(articles: Iterable[Article], *, window: FreshnessWindow) -> FreshnessResult:

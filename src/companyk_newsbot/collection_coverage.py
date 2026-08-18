@@ -10,6 +10,7 @@ from companyk_newsbot.collectors.google_news_rss import RSSCollectionResult
 
 CoverageStatus = Literal["SUFFICIENT", "INCONCLUSIVE"]
 DEFAULT_RSS_MIN_SUCCESS_RATIO = 0.90
+DEFAULT_ZERO_NEWS_MIN_SUCCESS_RATIO = 0.98
 
 
 @dataclass(frozen=True)
@@ -58,4 +59,18 @@ def assess_collection_coverage(
         success_ratio=ratio,
         threshold=threshold,
         reason=None if sufficient else "collection_coverage_below_threshold",
+    )
+
+
+def assess_zero_news_health(
+    result: RSSCollectionResult,
+    *,
+    threshold: float = DEFAULT_ZERO_NEWS_MIN_SUCCESS_RATIO,
+) -> CollectionCoverageAssessment:
+    """Apply a stricter request-success gate before declaring a raw zero-news day."""
+    assessment = assess_collection_coverage(result, threshold=threshold)
+    if assessment.sufficient:
+        return assessment
+    return CollectionCoverageAssessment(
+        **{**assessment.__dict__, "reason": "zero_news_collection_health_below_threshold"}
     )

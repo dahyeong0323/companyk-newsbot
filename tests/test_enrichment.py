@@ -230,3 +230,26 @@ def test_redirect_to_private_network_is_blocked_without_following() -> None:
     result = run_enrichment(handler, [article("AlphaBio")])
     assert len(calls) == 1
     assert result.articles[0].origin_metadata["enrichment_status"] == "blocked"
+
+
+def test_publisher_failure_does_not_trip_google_wrapper_circuit_breaker() -> None:
+    async def handler(request):
+        if request.url.host == "news.google.com":
+            return httpx.Response(302, headers={"location": "https://publisher.example/failure"}, request=request)
+        raise httpx.ReadTimeout("publisher timed out", request=request)
+
+    async def run():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        enricher = PublisherArticleEnricher(
+            client=client, concurrency=1, per_host_concurrency=1, timeout_seconds=0.05,
+        )
+        enricher._host_failure_threshold = 1
+        try:
+            await enricher.enrich_all([article("AlphaBio")], registry())
+            return enricher
+        finally:
+            await client.aclose()
+
+    enricher = asyncio.run(run())
+    assert "publisher.example" in enricher._blocked_hosts
+    assert "news.google.com" not in enricher._blocked_hosts

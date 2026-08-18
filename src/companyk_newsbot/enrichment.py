@@ -340,17 +340,17 @@ class PublisherArticleEnricher:
             if extracted is None:
                 return FetchResult("insufficient_content", resolved_url=final_url)
             return FetchResult("success", canonicalize_url(final_url), extracted.text, extracted.source)
-        except httpx.TimeoutException:
-            self._record_host_failure(initial_host)
+        except httpx.TimeoutException as exc:
+            self._record_host_failure(self._failure_host(exc, initial_host))
             return FetchResult("timeout")
         except BlockedEnrichment:
             return FetchResult("blocked")
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            self._record_host_failure(initial_host)
+            self._record_host_failure(self._failure_host(exc, initial_host))
             return FetchResult("blocked" if status in {401, 403, 407, 429, 451} else "http_error")
-        except (httpx.HTTPError, UnicodeError):
-            self._record_host_failure(initial_host)
+        except (httpx.HTTPError, UnicodeError) as exc:
+            self._record_host_failure(self._failure_host(exc, initial_host))
             return FetchResult("http_error")
         except Exception:
             return FetchResult("parse_error")
@@ -425,6 +425,18 @@ class PublisherArticleEnricher:
         self._host_failures[host] = self._host_failures.get(host, 0) + 1
         if self._host_failures[host] >= self._host_failure_threshold:
             self._blocked_hosts.add(host)
+
+    @staticmethod
+    def _failure_host(exc: Exception, fallback: str) -> str:
+        """Attribute a fetch failure to the request that actually failed.
+
+        Google News is commonly only the redirect wrapper.  Counting a
+        publisher failure against that wrapper can otherwise trip its circuit
+        breaker and suppress unrelated publisher enrichment.
+        """
+        request = getattr(exc, "request", None)
+        url = getattr(request, "url", None)
+        return (getattr(url, "host", None) or fallback).casefold()
 
     @staticmethod
     def _with_audit(article: Article, fetched: FetchResult, *, attempted: bool, status: str | None = None) -> Article:

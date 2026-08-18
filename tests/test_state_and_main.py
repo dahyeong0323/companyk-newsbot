@@ -44,6 +44,23 @@ def test_state_store_retains_sent_fingerprints_for_idempotency(tmp_path) -> None
     assert store.load().sent_event_fingerprints == ["event-1"]
 
 
+def test_state_store_marks_a_delivery_batch_in_one_state_save(tmp_path, monkeypatch) -> None:
+    store = JsonStateStore(tmp_path)
+    saves = 0
+    original_save = store.save
+
+    def counted_save(state):
+        nonlocal saves
+        saves += 1
+        original_save(state)
+
+    monkeypatch.setattr(store, "save", counted_save)
+    store.mark_sent_many(("event-1", "event-2", "event-1"), kind="event")
+
+    assert saves == 1
+    assert store.load().sent_event_fingerprints == ["event-1", "event-2"]
+
+
 def test_main_records_shadow_run_without_sending(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("RUN_MODE", "shadow")
     monkeypatch.setenv("STATE_DIR", str(tmp_path))

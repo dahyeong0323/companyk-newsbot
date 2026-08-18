@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from companyk_newsbot.collection_coverage import assess_collection_coverage
+from companyk_newsbot.collection_coverage import assess_collection_coverage, assess_zero_news_health
 from companyk_newsbot.collectors.google_news_rss import QueryCollectionResult, RSSCollectionResult
 
 
@@ -28,6 +28,15 @@ def test_default_coverage_threshold_boundary(successes: int, expected: str) -> N
 def test_zero_total_queries_is_configuration_error() -> None:
     with pytest.raises(ValueError, match="at least one configured direct query"):
         assess_collection_coverage(RSSCollectionResult(()))
+
+
+def test_zero_news_health_requires_stricter_coverage_than_normal_briefing() -> None:
+    assert assess_collection_coverage(collection(160, 164)).sufficient is True
+    zero_news = assess_zero_news_health(collection(160, 164))
+
+    assert zero_news.sufficient is False
+    assert zero_news.reason == "zero_news_collection_health_below_threshold"
+    assert zero_news.threshold == 0.98
 
 
 @pytest.mark.parametrize("threshold", [-0.01, 1.01])

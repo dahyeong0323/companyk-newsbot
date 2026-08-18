@@ -79,12 +79,25 @@ class JsonStateStore:
 
     def mark_sent(self, fingerprint: str, *, kind: str, limit: int = 5000) -> RunState:
         """Record a sent article/event only after successful delivery in a later step."""
-        if not fingerprint:
+        return self.mark_sent_many((fingerprint,), kind=kind, limit=limit)
+
+    def mark_sent_many(self, fingerprints_to_mark: list[str] | tuple[str, ...], *, kind: str, limit: int = 5000) -> RunState:
+        """Persist a delivery batch with one load/save transaction.
+
+        A successful email can contain many items.  Recording the whole batch
+        at once narrows the post-delivery crash window and avoids repeatedly
+        replacing the state file for one message.
+        """
+        if any(not fingerprint for fingerprint in fingerprints_to_mark):
             raise ValueError("fingerprint must not be blank")
         state = self.load()
         fingerprints = self._fingerprints(state, kind)
-        if fingerprint not in fingerprints:
-            fingerprints.append(fingerprint)
+        changed = False
+        for fingerprint in dict.fromkeys(fingerprints_to_mark):
+            if fingerprint not in fingerprints:
+                fingerprints.append(fingerprint)
+                changed = True
+        if changed:
             del fingerprints[:-limit]
             self.save(state)
         return state

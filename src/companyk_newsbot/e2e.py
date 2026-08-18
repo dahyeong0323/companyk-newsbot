@@ -19,7 +19,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from companyk_newsbot.collectors.google_news_rss import GoogleNewsRSSCollector, normalized_query
-from companyk_newsbot.collection_coverage import DEFAULT_RSS_MIN_SUCCESS_RATIO, assess_collection_coverage
+from companyk_newsbot.collection_coverage import DEFAULT_RSS_MIN_SUCCESS_RATIO, DEFAULT_ZERO_NEWS_MIN_SUCCESS_RATIO, assess_collection_coverage, assess_zero_news_health
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.portfolio_registry import PortfolioRegistry, build_direct_query_plan
 from companyk_newsbot.route_a_only import process_route_a_articles
@@ -27,7 +27,7 @@ from companyk_newsbot.judges.direct_event import DirectEventGrounder, DirectEven
 from companyk_newsbot.enrichment import PublisherArticleEnricher
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, RenderedEmail, ResendEmailSender, ResendSettings
-from companyk_newsbot.freshness import delivery_window, filter_articles, smoke_window
+from companyk_newsbot.freshness import delivery_window, filter_articles, rss_freshness_hint, smoke_window
 from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
 from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
 from companyk_newsbot.judges.route_b_legacy import RouteBCascadeJudge as LegacyRouteBCascadeJudge
@@ -47,6 +47,7 @@ DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
 DEFAULT_SMOKE_LOOKBACK_DAYS = 7
 DEFAULT_FIRST_RUN_HOURS = 30
 DEFAULT_OVERLAP_HOURS = 2
+DEFAULT_RSS_MAX_LOOKBACK_DAYS = 7
 ExecutionProfile = Literal["smoke", "full_shadow", "production"]
 
 
@@ -132,13 +133,21 @@ def _positive_int_from_environment(name: str, default: int) -> int:
 
 
 def _rss_min_success_ratio() -> float:
-    raw = os.getenv("RSS_MIN_SUCCESS_RATIO", str(DEFAULT_RSS_MIN_SUCCESS_RATIO)).strip()
+    return _success_ratio_from_environment("RSS_MIN_SUCCESS_RATIO", DEFAULT_RSS_MIN_SUCCESS_RATIO)
+
+
+def _zero_news_min_success_ratio() -> float:
+    return _success_ratio_from_environment("ZERO_NEWS_MIN_SUCCESS_RATIO", DEFAULT_ZERO_NEWS_MIN_SUCCESS_RATIO)
+
+
+def _success_ratio_from_environment(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
     try:
         value = float(raw)
     except ValueError as exc:
-        raise E2EExecutionError("configuration", "RSS_MIN_SUCCESS_RATIO must be between 0 and 1") from exc
+        raise E2EExecutionError("configuration", f"{name} must be between 0 and 1") from exc
     if not 0 <= value <= 1:
-        raise E2EExecutionError("configuration", "RSS_MIN_SUCCESS_RATIO must be between 0 and 1")
+        raise E2EExecutionError("configuration", f"{name} must be between 0 and 1")
     return value
 
 
@@ -287,10 +296,47 @@ def _openai_timeout_seconds() -> float:
     return timeout
 
 
+def _rss_max_lookback_days() -> int:
+    return _positive_int_from_environment("RSS_MAX_LOOKBACK_DAYS", DEFAULT_RSS_MAX_LOOKBACK_DAYS)
+
+
 def _fingerprint(item: RankedNewsItem) -> tuple[str, str]:
     kind = "event" if item.route == "direct" else "article"
+    if item.route == "direct" and item.direct_event is not None:
+        anchors = item.direct_event.anchors.payload()
+        identity = {
+            "route": item.route,
+            "companies": sorted(item.impacted_companies or (item.company,)),
+            "actions": anchors["primary_action_terms"],
+            "milestones": anchors["milestone_terms"],
+            "counterparties": anchors["counterparties"],
+            "dates": anchors["explicit_date_tokens"],
+            "amounts": anchors["amount_tokens"],
+            "percentages": anchors["percentage_tokens"],
+            "families": anchors["event_families"],
+        }
+        # Only use a cross-run identity when it has an action plus at least one
+        # concrete discriminator.  Otherwise separate same-company events can
+        # be incorrectly collapsed merely because their headlines are alike.
+        discriminators = (
+            identity["milestones"], identity["counterparties"], identity["dates"],
+            identity["amounts"], identity["percentages"], identity["families"],
+        )
+        if identity["actions"] and any(discriminators):
+            canonical = json.dumps(identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+            return kind, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     value = "|".join((item.route, item.company, item.article_url, item.article_title))
     return kind, hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _mark_delivery_batch(store: JsonStateStore, items: list[RankedNewsItem]) -> None:
+    fingerprints_by_kind: dict[str, list[str]] = {"article": [], "event": []}
+    for item in items:
+        kind, fingerprint = _fingerprint(item)
+        fingerprints_by_kind[kind].append(fingerprint)
+    for kind, fingerprints in fingerprints_by_kind.items():
+        if fingerprints:
+            store.mark_sent_many(fingerprints, kind=kind)
 
 
 def _log(event: str, **fields: object) -> None:
@@ -395,7 +441,7 @@ def _run_route_a_only_e2e(
             overlap_hours=overlap_hours,
             first_run_hours=first_run_hours,
         )
-        freshness_hint = "when:2d"
+        freshness_hint = rss_freshness_hint(freshness_window, maximum_days=_rss_max_lookback_days())
     _log(
         "queries_prepared",
         profile=profile,
@@ -422,6 +468,8 @@ def _run_route_a_only_e2e(
     rss_metrics = {**collection_result.metrics()}
     try:
         coverage = assess_collection_coverage(collection_result, threshold=_rss_min_success_ratio())
+        if profile == "production" and not collected:
+            coverage = assess_zero_news_health(collection_result, threshold=_zero_news_min_success_ratio())
     except ValueError as exc:
         if artifact_journal:
             artifact_journal.fail(f"collection_coverage: {exc}")
@@ -738,9 +786,7 @@ def _run_route_a_only_e2e(
         email_seconds = _seconds(email_started)
 
     if delivery_id is not None and profile != "full_shadow":
-        for item in ranked:
-            kind, fingerprint = _fingerprint(item)
-            store.mark_sent(fingerprint, kind=kind)
+        _mark_delivery_batch(store, ranked)
 
     artifact_json_path: str | None = None
     artifact_html_path: str | None = None
@@ -911,7 +957,7 @@ def run_real_e2e(
             overlap_hours=overlap_hours,
             first_run_hours=first_run_hours,
         )
-        freshness_hint = "when:2d"
+        freshness_hint = rss_freshness_hint(freshness_window, maximum_days=_rss_max_lookback_days())
     _log(
         "queries_prepared",
         profile=profile,
@@ -1272,9 +1318,7 @@ def run_real_e2e(
         )
 
     if delivery_id is not None and profile != "full_shadow":
-        for item in unsent:
-            kind, fingerprint = _fingerprint(item)
-            store.mark_sent(fingerprint, kind=kind)
+        _mark_delivery_batch(store, unsent)
 
     artifact_json_path: str | None = None
     artifact_html_path: str | None = None

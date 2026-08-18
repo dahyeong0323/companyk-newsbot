@@ -312,3 +312,80 @@ def test_sufficient_collection_with_zero_events_is_valid_empty_shadow(monkeypatc
     assert artifact["run_status"] == "success"
     assert artifact["user_facing"]["email_subject"].startswith("[SHADOW]")
     assert "[수집 실패]" not in artifact["user_facing"]["email_subject"]
+
+
+def test_cross_run_direct_event_fingerprint_ignores_representative_article_changes() -> None:
+    payload = {
+        "primary_action_terms": ["funding"], "milestone_terms": [], "counterparties": ["example capital"],
+        "explicit_date_tokens": ["2026-08-18"], "amount_tokens": ["USD:10000000"],
+        "percentage_tokens": [], "event_families": [],
+    }
+    direct_event = SimpleNamespace(anchors=SimpleNamespace(payload=lambda: payload))
+    first = e2e.RankedNewsItem(
+        route="direct", company="Direct Co", impacted_companies=("Direct Co",), article_title="Funding announced",
+        article_url="https://publisher-a.example/funding", published_at=NOW, materiality="high", direct_event=direct_event,
+    )
+    follow_up = e2e.RankedNewsItem(
+        route="direct", company="Direct Co", impacted_companies=("Direct Co",), article_title="Follow-up coverage",
+        article_url="https://publisher-b.example/funding", published_at=NOW, materiality="high", direct_event=direct_event,
+    )
+
+    assert e2e._fingerprint(first) == e2e._fingerprint(follow_up)
+
+
+def test_production_raw_zero_news_below_98_percent_is_inconclusive_and_never_delivers(monkeypatch, tmp_path) -> None:
+    class PartialEmptyCollector(FakeCollector):
+        async def collect_many(self, queries):
+            return RSSCollectionResult(tuple(
+                QueryCollectionResult(f"q{index}", "success" if index < 97 else "http_error")
+                for index in range(100)
+            ))
+
+    monkeypatch.setenv("ROUTE_B_ENABLED", "false")
+    monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", PartialEmptyCollector)
+    sent = []
+    monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))
+
+    result = e2e.run_real_e2e(
+        PortfolioRegistry.from_legacy(config()), JsonStateStore(tmp_path), now=NOW, profile="production", deliver=False,
+    )
+
+    assert result.status == "inconclusive"
+    assert result.cascade_metrics["collection_coverage_status"] == "INCONCLUSIVE"
+    assert result.cascade_metrics["collection_coverage_threshold"] == 0.98
+    assert result.cascade_metrics["inconclusive_reason"] == "zero_news_collection_health_below_threshold"
+    assert sent == []
+
+
+def test_production_raw_zero_news_at_98_percent_is_a_valid_empty_briefing(monkeypatch, tmp_path) -> None:
+    class HealthyEmptyCollector(FakeCollector):
+        async def collect_many(self, queries):
+            return RSSCollectionResult(tuple(
+                QueryCollectionResult(f"q{index}", "success" if index < 98 else "http_error")
+                for index in range(100)
+            ))
+
+    class EmptyJudge:
+        model = "gpt-5.6-luna"
+        metrics = UsageMetrics()
+
+        @classmethod
+        def from_environment(cls):
+            return cls()
+
+    class EmptyGrounder(EmptyJudge):
+        pass
+
+    monkeypatch.setenv("ROUTE_B_ENABLED", "false")
+    monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", HealthyEmptyCollector)
+    monkeypatch.setattr(e2e, "DirectEventJudge", EmptyJudge)
+    monkeypatch.setattr(e2e, "DirectEventGrounder", EmptyGrounder)
+
+    result = e2e.run_real_e2e(
+        PortfolioRegistry.from_legacy(config()), JsonStateStore(tmp_path), now=NOW, profile="production", deliver=False,
+    )
+
+    assert result.status == "success"
+    assert result.final_items == 0
+    assert result.cascade_metrics["collection_coverage_status"] == "SUFFICIENT"
+    assert result.cascade_metrics["collection_coverage_threshold"] == 0.98
