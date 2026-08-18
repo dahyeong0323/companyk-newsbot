@@ -46,6 +46,7 @@ class UsageMetrics:
     output_tokens: int = 0
     reasoning_tokens: int = 0
     failures: int = 0
+    invalid_evidence_fallbacks: int = 0
     latencies_ms: list[float] = field(default_factory=list)
 
     def payload(self, prefix: str) -> dict[str, object]:
@@ -54,6 +55,7 @@ class UsageMetrics:
         return {f"{prefix}_calls": self.calls, f"{prefix}_input_tokens": self.input_tokens,
             f"{prefix}_cached_input_tokens": self.cached_input_tokens, f"{prefix}_output_tokens": self.output_tokens,
             f"{prefix}_reasoning_tokens": self.reasoning_tokens, f"{prefix}_failures": self.failures,
+            f"{prefix}_invalid_evidence_fallbacks": self.invalid_evidence_fallbacks,
             f"{prefix}_latency_p50_ms": round(p50, 2)}
 
     def record(self, response: Any, latency_ms: float) -> None:
@@ -96,7 +98,21 @@ class DirectEventJudge:
             parsed = response.output_parsed
             if not isinstance(parsed, DirectEventAssessment): raise ValueError("missing structured assessment")
             valid_ids = {article_id(match.article) for match in event.all_matches}
-            if any(value not in valid_ids for value in parsed.evidence_article_ids): raise ValueError("assessment returned unknown evidence ID")
+            if any(value not in valid_ids for value in parsed.evidence_article_ids):
+                # Never repair an LLM-supplied claim with invented support. This
+                # event is conservatively excluded while the remaining events
+                # continue through the batch.
+                self.metrics.record(response, (monotonic() - started) * 1000)
+                self.metrics.invalid_evidence_fallbacks += 1
+                return DirectEventAssessment(
+                    decision="IGNORE",
+                    reason_code="invalid_evidence_id",
+                    materiality="none",
+                    event_family="other",
+                    fact_summary=None,
+                    investor_insight=None,
+                    evidence_article_ids=[],
+                )
             self.metrics.record(response, (monotonic() - started) * 1000)
             return parsed
         except Exception:
