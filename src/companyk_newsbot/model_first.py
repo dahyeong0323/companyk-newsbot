@@ -103,9 +103,11 @@ def prepare_events(matches: tuple[RouteAMatch, ...], registry: Any, *, identity_
             provisional_by_id[compressed_id] = group
             original = {item.article_id: item for item in candidates}
             representative = original[group.representative_article_id]
-            member_titles = "; ".join(original[item].title[:180] for item in group.member_article_ids)
+            member_titles = "; ".join(
+                original[item].title[:180] for item in group.member_article_ids[:2]
+            )
             compressed.append(EventCandidate(compressed_id, group.event_label,
-                f"Representative: {representative.title[:300]}\nMembers: {member_titles[:1200]}",
+                f"Representative: {representative.title[:300]}\nMembers: {member_titles}",
                 representative.publisher, representative.published_at))
         try:
             merged = partition_once(company_id, compressed)

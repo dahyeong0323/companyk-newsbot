@@ -54,3 +54,40 @@ def test_route_a_only_renderer_omits_route_b_section_entirely() -> None:
     )
     assert "2. 포트폴리오 영향 뉴스" not in rendered.html
     assert "해당 회사에 중요한 이유:" not in rendered.html
+
+
+def test_renderer_groups_same_company_events_once_and_sorts_them_newest_first() -> None:
+    older_article = Article(
+        source="test", source_type="fixture", title="Older event", url="https://example.com/older",
+        canonical_url="https://example.com/older", retrieved_at=datetime(2026, 8, 12, tzinfo=UTC),
+        published_at=datetime(2026, 8, 10, tzinfo=UTC),
+    )
+    newer_article = Article(
+        source="test", source_type="fixture", title="Newer event", url="https://example.com/newer",
+        canonical_url="https://example.com/newer", retrieved_at=datetime(2026, 8, 12, tzinfo=UTC),
+        published_at=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+    other_article = Article(
+        source="test", source_type="fixture", title="Other company event", url="https://example.com/other",
+        canonical_url="https://example.com/other", retrieved_at=datetime(2026, 8, 12, tzinfo=UTC),
+        published_at=datetime(2026, 8, 12, tzinfo=UTC),
+    )
+    summary = lambda item: SummaryOutput(
+        fact_summary="요약", insight_one_liner="투자자 관점", insight_dimension="financing_runway",
+        insight_mode="watchpoint", confidence="medium", evidence_article_ids=[article_id(item.article)],
+    )
+    older = RouteAMatch("Alpha", ("Alpha",), older_article)
+    newer = RouteAMatch("Alpha", ("Alpha",), newer_article)
+    other = RouteAMatch("Beta", ("Beta",), other_article)
+    rendered = HtmlEmailRenderer().render(
+        [
+            EmailNewsItem(RankedNewsItem.from_direct(older), summary(older)),
+            EmailNewsItem(RankedNewsItem.from_direct(other), summary(other)),
+            EmailNewsItem(RankedNewsItem.from_direct(newer), summary(newer)),
+        ],
+        report_date=date(2026, 8, 12), route_b_enabled=False,
+    )
+    assert rendered.html.count('data-company-group="Alpha"') == 1
+    assert rendered.html.index('data-company-group="Alpha"') < rendered.html.index('data-company-group="Beta"')
+    assert rendered.html.index("Newer event") < rendered.html.index("Older event") < rendered.html.index('data-company-group="Beta"')
+    assert 'data-published-at="2026-08-11T00:00:00+00:00"' in rendered.html

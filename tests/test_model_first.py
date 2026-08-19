@@ -121,11 +121,13 @@ def test_bulk_grouping_fallback_merges_chunk_provisionals_without_article_loss()
 
     class BulkOnlyGrouping:
         calls = 0
+        final_merge_candidates = ()
         def partition(self, *, candidates, **kwargs):
             self.calls += 1
             if len(candidates) == 4 and self.calls <= 2:
                 return ()
             if all(item.article_id.startswith("provisional-") for item in candidates):
+                type(self).final_merge_candidates = tuple(candidates)
                 return (
                     EventGroup((candidates[0].article_id, candidates[1].article_id), candidates[0].article_id, "독파모 평가 결과"),
                     EventGroup((candidates[2].article_id,), candidates[2].article_id, "NVIDIA B200"),
@@ -138,6 +140,7 @@ def test_bulk_grouping_fallback_merges_chunk_provisionals_without_article_loss()
     assert [event.coverage_count for event in events] == [2, 1, 1]
     assert sum(event.coverage_count for event in events) == len(values)
     assert metrics["grouping_failures"] == 1
+    assert all(candidate.lead.count(";") <= 1 for candidate in BulkOnlyGrouping.final_merge_candidates)
 
 
 def test_model_first_filters_lexical_noise_and_uses_group_label_for_event_identity() -> None:

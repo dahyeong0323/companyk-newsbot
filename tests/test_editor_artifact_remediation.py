@@ -205,7 +205,7 @@ def test_html_renders_insight_coverage_representative_url_and_multi_company_labe
     assert "Monitor the next disclosed milestone." in rendered.html
     assert "외 1개 매체 보도" in rendered.html
     assert f'href="{item.article_url}"' in rendered.html
-    assert "영향: A · B" in rendered.html
+    assert 'data-company-group="A · B"' in rendered.html
 
 
 def test_full_shadow_artifact_serializes_event_editor_and_dedup_audit(tmp_path) -> None:
