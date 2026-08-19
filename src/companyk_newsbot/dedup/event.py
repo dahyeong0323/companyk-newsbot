@@ -57,6 +57,10 @@ class EventCluster:
     anchors: EventAnchors
     representative_scores: dict[str, RepresentativeScore]
     dedup_decisions: tuple[PairDecision, ...]
+    semantic_fingerprint: str = ""
+    event_label: str = ""
+    grouping_reason: str = ""
+    representative_selection_reason: str = ""
 
     @property
     def coverage_count(self) -> int:

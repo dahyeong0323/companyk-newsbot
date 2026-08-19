@@ -41,6 +41,8 @@ class DirectGroundingVerdict(BaseModel):
 @dataclass
 class UsageMetrics:
     calls: int = 0
+    attempts: int = 0
+    retries: int = 0
     input_tokens: int = 0
     cached_input_tokens: int = 0
     output_tokens: int = 0
@@ -52,11 +54,13 @@ class UsageMetrics:
     def payload(self, prefix: str) -> dict[str, object]:
         ordered = sorted(self.latencies_ms)
         p50 = ordered[(len(ordered) - 1) // 2] if ordered else 0
+        p95 = ordered[min(len(ordered) - 1, int(len(ordered) * .95))] if ordered else 0
         return {f"{prefix}_calls": self.calls, f"{prefix}_input_tokens": self.input_tokens,
             f"{prefix}_cached_input_tokens": self.cached_input_tokens, f"{prefix}_output_tokens": self.output_tokens,
             f"{prefix}_reasoning_tokens": self.reasoning_tokens, f"{prefix}_failures": self.failures,
+            f"{prefix}_attempts": self.attempts, f"{prefix}_retries": self.retries,
             f"{prefix}_invalid_evidence_fallbacks": self.invalid_evidence_fallbacks,
-            f"{prefix}_latency_p50_ms": round(p50, 2)}
+            f"{prefix}_latency_p50_ms": round(p50, 2), f"{prefix}_latency_p95_ms": round(p95, 2)}
 
     def record(self, response: Any, latency_ms: float) -> None:
         self.latencies_ms.append(latency_ms)
@@ -92,31 +96,28 @@ class DirectEventJudge:
 
     def assess(self, event: EventCluster) -> DirectEventAssessment:
         started = monotonic(); self.metrics.calls += 1
-        try:
-            response = self.client.responses.parse(model=self.model, reasoning={"effort": self.reasoning_effort}, text_format=DirectEventAssessment,
-                input=[{"role": "system", "content": ASSESSMENT_PROMPT}, {"role": "user", "content": json.dumps(event_payload(event), ensure_ascii=False)}])
-            parsed = response.output_parsed
-            if not isinstance(parsed, DirectEventAssessment): raise ValueError("missing structured assessment")
-            valid_ids = {article_id(match.article) for match in event.all_matches}
-            if any(value not in valid_ids for value in parsed.evidence_article_ids):
-                # Never repair an LLM-supplied claim with invented support. This
-                # event is conservatively excluded while the remaining events
-                # continue through the batch.
+        for attempt in range(2):
+            self.metrics.attempts += 1
+            try:
+                response = self.client.responses.parse(model=self.model, reasoning={"effort": self.reasoning_effort}, text_format=DirectEventAssessment,
+                    input=[{"role": "system", "content": ASSESSMENT_PROMPT}, {"role": "user", "content": json.dumps(event_payload(event), ensure_ascii=False)}])
+                parsed = response.output_parsed
+                if not isinstance(parsed, DirectEventAssessment): raise ValueError("missing structured assessment")
+                valid_ids = {article_id(match.article) for match in event.all_matches}
+                if any(value not in valid_ids for value in parsed.evidence_article_ids):
+                    # Never repair an LLM-supplied claim with invented support.
+                    # This event is conservatively excluded while remaining
+                    # events continue through the batch.
+                    self.metrics.record(response, (monotonic() - started) * 1000)
+                    self.metrics.invalid_evidence_fallbacks += 1
+                    return DirectEventAssessment(decision="IGNORE", reason_code="invalid_evidence_id", materiality="none", event_family="other", fact_summary=None, investor_insight=None, evidence_article_ids=[])
                 self.metrics.record(response, (monotonic() - started) * 1000)
-                self.metrics.invalid_evidence_fallbacks += 1
-                return DirectEventAssessment(
-                    decision="IGNORE",
-                    reason_code="invalid_evidence_id",
-                    materiality="none",
-                    event_family="other",
-                    fact_summary=None,
-                    investor_insight=None,
-                    evidence_article_ids=[],
-                )
-            self.metrics.record(response, (monotonic() - started) * 1000)
-            return parsed
-        except Exception:
-            self.metrics.failures += 1; self.metrics.latencies_ms.append((monotonic() - started) * 1000); raise
+                return parsed
+            except Exception:
+                if attempt == 0:
+                    self.metrics.retries += 1
+                    continue
+                self.metrics.failures += 1; self.metrics.latencies_ms.append((monotonic() - started) * 1000); raise
 
 
 class DirectEventGrounder:
@@ -136,14 +137,20 @@ class DirectEventGrounder:
             verdict = DirectGroundingVerdict(fact_summary="UNSUPPORTED", investor_insight="UNSUPPORTED" if assessment.investor_insight else "NOT_PRESENT", unsupported_claims=["unknown evidence id"])
             return event.primary.article.title, None, verdict
         started = monotonic(); self.metrics.calls += 1
-        try:
-            response = self.client.responses.parse(model=self.model, reasoning={"effort": self.reasoning_effort}, text_format=DirectGroundingVerdict,
-                input=[{"role": "system", "content": GROUNDING_PROMPT}, {"role": "user", "content": json.dumps({"event": event_payload(event), "assessment": assessment.model_dump()}, ensure_ascii=False)}])
-            verdict = response.output_parsed
-            if not isinstance(verdict, DirectGroundingVerdict): raise ValueError("missing grounding verdict")
-            self.metrics.record(response, (monotonic() - started) * 1000)
-        except Exception:
-            self.metrics.failures += 1; self.metrics.latencies_ms.append((monotonic() - started) * 1000); raise
+        for attempt in range(2):
+            self.metrics.attempts += 1
+            try:
+                response = self.client.responses.parse(model=self.model, reasoning={"effort": self.reasoning_effort}, text_format=DirectGroundingVerdict,
+                    input=[{"role": "system", "content": GROUNDING_PROMPT}, {"role": "user", "content": json.dumps({"event": event_payload(event), "assessment": assessment.model_dump()}, ensure_ascii=False)}])
+                verdict = response.output_parsed
+                if not isinstance(verdict, DirectGroundingVerdict): raise ValueError("missing grounding verdict")
+                self.metrics.record(response, (monotonic() - started) * 1000)
+                break
+            except Exception:
+                if attempt == 0:
+                    self.metrics.retries += 1
+                    continue
+                self.metrics.failures += 1; self.metrics.latencies_ms.append((monotonic() - started) * 1000); raise
         fact = assessment.fact_summary if verdict.fact_summary == "SUPPORTED" else event.primary.article.title
         insight = assessment.investor_insight if verdict.investor_insight == "SUPPORTED" else None
         return fact or event.primary.article.title, insight, verdict

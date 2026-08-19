@@ -23,6 +23,8 @@ from companyk_newsbot.collection_coverage import DEFAULT_RSS_MIN_SUCCESS_RATIO, 
 from companyk_newsbot.config import KeywordMapConfig
 from companyk_newsbot.portfolio_registry import PortfolioRegistry, build_direct_query_plan
 from companyk_newsbot.route_a_only import process_route_a_articles
+from companyk_newsbot.semantic_identity import GPT54MiniIdentityProvider
+from companyk_newsbot.semantic_grouping import GPT54MiniGroupingProvider
 from companyk_newsbot.judges.direct_event import DirectEventGrounder, DirectEventJudge
 from companyk_newsbot.enrichment import PublisherArticleEnricher
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
@@ -34,6 +36,7 @@ from companyk_newsbot.judges.route_b_legacy import RouteBCascadeJudge as LegacyR
 from companyk_newsbot.judges.summary import NewsSummarizer as EditorialPayloadBuilder
 from companyk_newsbot.ranking import NewsRanker, RankedNewsItem
 from companyk_newsbot.rules import ExposureRegistry, RouteADetector, RouteBCandidateGenerator
+from companyk_newsbot.runtime_progress import RuntimeProgress
 from companyk_newsbot.state import JsonStateStore
 
 
@@ -303,6 +306,9 @@ def _rss_max_lookback_days() -> int:
 def _fingerprint(item: RankedNewsItem) -> tuple[str, str]:
     kind = "event" if item.route == "direct" else "article"
     if item.route == "direct" and item.direct_event is not None:
+        semantic_fingerprint = getattr(item.direct_event, "semantic_fingerprint", "")
+        if semantic_fingerprint:
+            return kind, semantic_fingerprint
         anchors = item.direct_event.anchors.payload()
         identity = {
             "route": item.route,
@@ -404,10 +410,12 @@ def _run_route_a_only_e2e(
             _assert_test_recipient(settings)
 
     artifact_journal: FullShadowArtifactJournal | None = None
+    runtime_progress: RuntimeProgress | None = None
     if profile == "full_shadow":
         try:
             artifact_dir = preflight_artifact_dir(os.getenv("ARTIFACT_DIR", ""))
             artifact_journal = FullShadowArtifactJournal(artifact_dir, run_time)
+            runtime_progress = RuntimeProgress(artifact_journal.json_path.with_suffix(".runtime.json"))
         except Exception as exc:
             raise E2EExecutionError("artifact_storage", str(exc)) from exc
 
@@ -615,6 +623,7 @@ def _run_route_a_only_e2e(
             artifact_html_path=artifact_html_path,
             production_delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
         )
+        if runtime_progress: runtime_progress.finish("inconclusive")
         _log("e2e_complete", **result.log_payload())
         return result
 
@@ -659,27 +668,19 @@ def _run_route_a_only_e2e(
     enrichment_seconds = _seconds(enrichment_started)
     enrichment_metrics = enrichment.metrics.payload()
     if artifact_journal:
-        artifact_journal.update("enrichment", {
-            "metrics": {**enrichment_metrics, "enrichment_seconds": enrichment_seconds},
-            "articles": [
-                {
-                    "article_url": article.url,
-                    "canonical_url": article.canonical_url,
-                    "origin_queries": article.origin_metadata.get("origin_queries", []),
-                    "candidate_company_ids": article.origin_metadata.get("candidate_company_ids", []),
-                    "enrichment_attempted": article.origin_metadata.get("enrichment_attempted", False),
-                    "enrichment_status": article.origin_metadata.get("enrichment_status"),
-                    "resolved_url": article.origin_metadata.get("resolved_url"),
-                    "enrichment_source": article.origin_metadata.get("enrichment_source"),
-                    "enriched_char_count": article.origin_metadata.get("enriched_char_count", 0),
-                }
-                for article in enrichment.articles
-            ],
-        })
+        # Preserve complete, model-ready Article payloads. This allows an
+        # interrupted Full Shadow to replay downstream semantics without RSS
+        # collection or another publisher-enrichment pass.
+        artifact_journal.update("enrichment", journal_collection_data(
+            enrichment.articles, **{**enrichment_metrics, "enrichment_seconds": enrichment_seconds}
+        ))
 
     judge = DirectEventJudge.from_environment()
     grounder = DirectEventGrounder.from_environment()
-    event_resolver = LunaEventPairResolver.from_environment() if _route_a_event_resolver_enabled() else None
+    model_first_enabled = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    identity_provider = GPT54MiniIdentityProvider.from_environment() if model_first_enabled else None
+    grouping_provider = GPT54MiniGroupingProvider.from_environment() if model_first_enabled else None
+    event_resolver = LunaEventPairResolver.from_environment() if not model_first_enabled and _route_a_event_resolver_enabled() else None
     processing_started = monotonic()
     try:
         processed = process_route_a_articles(
@@ -687,18 +688,17 @@ def _run_route_a_only_e2e(
             registry,
             judge=judge,
             grounder=grounder,
+            identity_provider=identity_provider,
+            grouping_provider=grouping_provider,
             event_resolver=event_resolver,
+            forensic_progress=runtime_progress.event if runtime_progress else None,
         )
     except Exception as exc:
+        if runtime_progress: runtime_progress.finish("failed")
         if artifact_journal:
             artifact_journal.fail(f"route_a_processing: {exc}")
         raise E2EExecutionError("route_a_processing", str(exc)) from exc
     processing_seconds = _seconds(processing_started)
-    event_resolver_metrics = (
-        event_resolver.metrics_payload()
-        if event_resolver is not None and hasattr(event_resolver, "metrics_payload")
-        else {"event_resolver_calls": 0, "event_resolver_failures": 0}
-    )
     assessment_metrics = judge.metrics.payload("direct_assessment")
     grounding_metrics = grounder.metrics.payload("direct_grounding")
     assessment_cost = _estimated_stage_cost(assessment_metrics, "direct_assessment", "DIRECT_EVENT")
@@ -709,7 +709,8 @@ def _run_route_a_only_e2e(
         "enrichment_seconds": enrichment_seconds,
         **assessment_metrics,
         **grounding_metrics,
-        **event_resolver_metrics,
+        **(identity_provider.metrics_payload() if identity_provider else {"identity_requests": 0, "identity_failures": 0}),
+        **(grouping_provider.metrics_payload() if grouping_provider else {"grouping_requests": 0, "grouping_failures": 0}),
         "route_b_enabled": False,
         "route_b_calls": 0,
         "article_level_ai_calls": 0,
@@ -723,7 +724,30 @@ def _run_route_a_only_e2e(
         "direct_deliver_high": processed.deliver_high,
         "direct_deliver_medium": processed.deliver_medium,
         "direct_ignore": processed.ignore_count,
+        "direct_event_model_failure_events": processed.model_failure_events,
+        **(processed.model_metrics or {}),
     }
+    if processed.systemic_model_failure:
+        if runtime_progress: runtime_progress.finish("inconclusive")
+        result = E2EResult(status="inconclusive", profile=profile, query_count=len(direct_queries),
+            direct_query_count=len(direct_queries), exposure_query_count=0,
+            collection_successes=len(collection_result.successes), collection_failures=len(collection_result.failures),
+            collection_seconds=collection_seconds, collected=len(collected), freshness_seconds=freshness_seconds,
+            freshness_window_start=freshness.window.start.isoformat(), freshness_window_end=freshness.window.end.isoformat(),
+            freshness_mode=freshness.window.mode, freshness_accepted=len(fresh_articles),
+            freshness_rejected_too_old=freshness.rejected_too_old, freshness_rejected_future=freshness.rejected_future,
+            freshness_rejected_missing_timestamp=freshness.rejected_missing_timestamp, dedup_seconds=dedup_seconds,
+            article_deduped=len(article_dedup.articles), article_duplicates=article_duplicates,
+            routing_seconds=processing_seconds, route_a_matches=len(processed.matches), route_a_events=len(processed.events),
+            route_b_candidates=0, route_b_accepted=0, route_b_rejected=0,
+            reject_reasons={"direct_event_model_failure_rate": processed.model_failure_events}, final_items=0,
+            already_sent=0, same_run_duplicates=0, openai_model=judge.model, judge_seconds=processing_seconds,
+            judge_calls=judge.metrics.calls, cascade_metrics={**cascade_metrics, "inconclusive_reason": "direct_event_model_failure_rate"},
+            summary_seconds=0.0, summary_calls=0, render_seconds=0.0, email_seconds=0.0,
+            total_seconds=_seconds(total_started), delivery_id=None, artifact_json_path=None, artifact_html_path=None,
+            production_delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None))
+        _log("e2e_complete", **result.log_payload())
+        return result
     reject_reasons = {"direct_event:IGNORE": processed.ignore_count} if processed.ignore_count else {}
     _log(
         "route_a_processing_complete",
@@ -738,6 +762,29 @@ def _run_route_a_only_e2e(
 
     ranked = list(processed.ranked_items)
     email_items = list(processed.email_items)
+    company_stage_counts = {
+        company.company_id: {"company_id": company.company_id, "company": company.display_name,
+            "rss_collected": 0, "fresh": 0, "mechanical_dedup_retained": 0,
+            "identity_related": 0, "identity_not_related": 0, "identity_uncertain": 0,
+            "canonical_events": 0, "deliver": 0, "ignore": 0}
+        for company in registry.companies
+    }
+    def count_company_stage(stage: str, articles):
+        for article in articles:
+            ids = article.origin_metadata.get("candidate_company_ids", [])
+            if isinstance(ids, str): ids = [ids]
+            for company_id in ids:
+                row = company_stage_counts.get(company_id)
+                if row is not None: row[stage] += 1
+    count_company_stage("rss_collected", collected)
+    count_company_stage("fresh", fresh_articles)
+    count_company_stage("mechanical_dedup_retained", article_dedup.articles)
+    for row in (processed.model_metrics or {}).get("company_stage_counts", []):
+        if not isinstance(row, dict): continue
+        target = company_stage_counts.get(row.get("company_id"))
+        if target is not None:
+            for key in ("identity_related", "identity_not_related", "identity_uncertain", "canonical_events", "deliver", "ignore"):
+                target[key] = int(row.get(key, 0) or 0)
     already_sent = 0
     same_run_duplicates = 0
     if profile != "full_shadow":
@@ -839,6 +886,8 @@ def _run_route_a_only_e2e(
                     },
                     "direct_event_assessments": {key: value.model_dump() for key, value in processed.assessments.items()},
                     "direct_grounding_verdicts": {key: value.model_dump() for key, value in processed.grounding_verdicts.items()},
+                    "identity_decisions": (processed.model_metrics or {}).get("identity_decisions", []),
+                    "company_stage_counts": list(company_stage_counts.values()),
                     "enrichment_audit": [
                         {
                             "article_url": article.url,
@@ -905,6 +954,7 @@ def _run_route_a_only_e2e(
         artifact_html_path=artifact_html_path,
         production_delivery_checkpoint_before=(delivery_checkpoint_before.isoformat() if delivery_checkpoint_before else None),
     )
+    if runtime_progress: runtime_progress.finish("success")
     _log("e2e_complete", **result.log_payload())
     return result
 

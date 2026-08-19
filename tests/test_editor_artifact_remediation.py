@@ -234,6 +234,9 @@ def test_full_shadow_artifact_serializes_event_editor_and_dedup_audit(tmp_path) 
     final = payload["user_facing"]["final_items"]
     assert all(member["representative_score"] == member["score_breakdown"]["total"] for member in route_a["member_articles"])
     assert route_a["pairwise_dedup_decisions"]
+    assert "event_fingerprint" in route_a
+    assert "canonical_event_label" in route_a
+    assert "representative_selection_reason" in route_a
     assert all(member["score_breakdown"]["total"] == member["representative_score"] for member in route_b["member_articles"])
     assert route_b["aggregate_materiality"] == "high"
     assert len(route_b["impact_links"]) == 2

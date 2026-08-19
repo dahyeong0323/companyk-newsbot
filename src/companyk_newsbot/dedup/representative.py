@@ -33,6 +33,12 @@ class RepresentativeScore:
 class RepresentativeArticleSelector:
     SOURCE_OF_RECORD = (".gov", ".go.kr", "sec.gov", "dart.fss", "fda.gov", "ema.europa.eu", "ir.", "newsroom", "investor")
     AGGREGATORS = ("news.google", "google.com", "yahoo", "msn.com", "newsbreak", "feedproxy", "feedburner")
+    LOW_QUALITY_REPOST_MARKERS = ("naver blog", "네이버 블로그", "blog.naver.com", "tistory", "티스토리")
+
+    def is_low_quality_repost(self, article: Article) -> bool:
+        """Only guard obvious personal-blog/repost sources when an alternative exists."""
+        value = " ".join((article.title, article.source, article.url, article.canonical_url)).casefold()
+        return any(marker in value for marker in self.LOW_QUALITY_REPOST_MARKERS)
 
     def source_class(self, article: Article) -> str:
         url = article.canonical_url.casefold()

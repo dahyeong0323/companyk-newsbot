@@ -101,6 +101,20 @@ def test_empty_input_is_a_valid_zero_item_briefing() -> None:
     assert judge.calls == 0 and grounder.calls == []
 
 
+def test_one_grounding_failure_is_isolated_and_never_emails_that_event() -> None:
+    class FlakyGrounder(FakeGrounder):
+        def ground(self, event, assessment):
+            if event.company == "AlphaBio":
+                raise RuntimeError("grounding unavailable")
+            return super().ground(event, assessment)
+
+    source = [article("AlphaBio", "a", "material event"), article("BetaTech", "b", "material event")]
+    result = process_route_a_articles(source, registry(), judge=AlwaysDeliverJudge(), grounder=FlakyGrounder())
+    assert result.model_failure_events == 1
+    assert [item.item.company for item in result.email_items] == ["BetaTech"]
+    assert result.systemic_model_failure is False
+
+
 def test_multiple_articles_in_one_proto_event_get_one_assessment() -> None:
     first = article("AlphaBio", "funding-a", "raises $10m Series B funding")
     second = first.model_copy(update={

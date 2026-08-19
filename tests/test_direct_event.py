@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from companyk_newsbot.dedup import RouteAEventClusterer, article_id
 from companyk_newsbot.judges.direct_event import DirectEventAssessment, DirectEventJudge
 from companyk_newsbot.models import Article
@@ -73,3 +75,26 @@ def test_valid_assessment_evidence_remains_deliverable() -> None:
 
     assert judge.assess(cluster) == valid
     assert judge.metrics.invalid_evidence_fallbacks == 0
+
+
+def test_assessment_schema_or_api_failure_retries_once() -> None:
+    cluster = event()
+    valid = DirectEventAssessment(
+        decision="DELIVER", reason_code="funding", materiality="high", event_family="financing",
+        fact_summary="알파바이오가 신규 투자를 유치했습니다.", investor_insight=None,
+        evidence_article_ids=[article_id(cluster.primary.article)],
+    )
+
+    class FlakyResponses:
+        calls = 0
+        def parse(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary API failure")
+            return SimpleNamespace(output_parsed=valid, usage=None)
+
+    responses = FlakyResponses()
+    judge = DirectEventJudge(SimpleNamespace(responses=responses), model="test")
+    assert judge.assess(cluster) == valid
+    assert responses.calls == 2
+    assert judge.metrics.retries == 1 and judge.metrics.failures == 0
