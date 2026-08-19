@@ -143,6 +143,35 @@ def test_bulk_grouping_fallback_merges_chunk_provisionals_without_article_loss()
     assert all(candidate.lead.count(";") <= 1 for candidate in BulkOnlyGrouping.final_merge_candidates)
 
 
+def test_bulk_grouping_fallback_bounds_hierarchical_provisional_merges() -> None:
+    registry = load_portfolio_registry("config/portfolio_registry.yaml")
+    values = [article(f"업스테이지 기사 {index}") for index in range(50)]
+
+    class BoundedGrouping:
+        calls: list[int] = []
+        full_attempts = 0
+
+        def partition(self, *, candidates, **kwargs):
+            type(self).calls.append(len(candidates))
+            if not candidates[0].article_id.startswith("provisional-") and len(candidates) == 50:
+                type(self).full_attempts += 1
+                return ()
+            if any(item.article_id.startswith("provisional-") for item in candidates):
+                return tuple(
+                    EventGroup(tuple(item.article_id for item in candidates[index:index + 2]), candidates[index].article_id,
+                        f"merged {index}")
+                    for index in range(0, len(candidates), 2)
+                )
+            return tuple(EventGroup((item.article_id,), item.article_id, item.title) for item in candidates)
+
+    events, _ = prepare_events(tuple(RouteAMatch("업스테이지", ("업스테이지",), value) for value in values), registry,
+        identity_provider=AllRelated(), grouping_provider=BoundedGrouping())
+    assert BoundedGrouping.full_attempts == 2
+    assert max(BoundedGrouping.calls[2:]) <= 24
+    assert sum(event.coverage_count for event in events) == len(values)
+    assert len(events) < 50
+
+
 def test_model_first_filters_lexical_noise_and_uses_group_label_for_event_identity() -> None:
     registry = load_portfolio_registry("config/portfolio_registry.yaml")
     related, noise = article("업스테이지, 독파모 2차 평가 통과"), article("식중독균이 빠르게 자란다")

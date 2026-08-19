@@ -94,32 +94,46 @@ def prepare_events(matches: tuple[RouteAMatch, ...], registry: Any, *, identity_
             except Exception:
                 provisional.extend(EventGroup((item.article_id,), item.article_id, item.title[:160],
                     "chunk grouping unavailable", "single article chunk fail-safe") for item in chunk)
-        if len(provisional) <= 1:
-            return tuple(provisional)
-        compressed: list[EventCandidate] = []
-        provisional_by_id: dict[str, EventGroup] = {}
-        for index, group in enumerate(provisional):
-            compressed_id = f"provisional-{index}"
-            provisional_by_id[compressed_id] = group
-            original = {item.article_id: item for item in candidates}
-            representative = original[group.representative_article_id]
-            member_titles = "; ".join(
-                original[item].title[:180] for item in group.member_article_ids[:2]
-            )
-            compressed.append(EventCandidate(compressed_id, group.event_label,
-                f"Representative: {representative.title[:300]}\nMembers: {member_titles}",
-                representative.publisher, representative.published_at))
-        try:
-            merged = partition_once(company_id, compressed)
-        except Exception:
-            return tuple(provisional)
-        final: list[EventGroup] = []
-        for group in merged:
-            children = [provisional_by_id[item] for item in group.member_article_ids]
-            selected = provisional_by_id[group.representative_article_id]
-            final.append(EventGroup(tuple(item for child in children for item in child.member_article_ids),
-                selected.representative_article_id, group.event_label, group.reason, group.representative_reason))
-        return tuple(final)
+        original = {item.article_id: item for item in candidates}
+
+        def compress(groups: list[EventGroup], pass_number: int) -> tuple[list[EventCandidate], dict[str, EventGroup]]:
+            compressed: list[EventCandidate] = []
+            groups_by_id: dict[str, EventGroup] = {}
+            for index, group in enumerate(groups):
+                compressed_id = f"provisional-{pass_number}-{index}"
+                groups_by_id[compressed_id] = group
+                representative = original[group.representative_article_id]
+                member_titles = "; ".join(
+                    original[item].title[:180] for item in group.member_article_ids[:2]
+                )
+                compressed.append(EventCandidate(compressed_id, group.event_label,
+                    f"Representative: {representative.title[:300]}\nMembers: {member_titles}",
+                    representative.publisher, representative.published_at))
+            return compressed, groups_by_id
+
+        current = provisional
+        # Bound every merge call. Stop on failure or no reduction so fail-safe
+        # behavior preserves the last complete partition without recursion.
+        for pass_number in range(3):
+            if len(current) <= 1:
+                return tuple(current)
+            compressed, groups_by_id = compress(current, pass_number)
+            merged: list[EventGroup] = []
+            try:
+                for offset in range(0, len(compressed), chunk_size):
+                    merged.extend(partition_once(company_id, compressed[offset:offset + chunk_size]))
+            except Exception:
+                return tuple(current)
+            next_groups: list[EventGroup] = []
+            for group in merged:
+                children = [groups_by_id[item] for item in group.member_article_ids]
+                selected = groups_by_id[group.representative_article_id]
+                next_groups.append(EventGroup(tuple(item for child in children for item in child.member_article_ids),
+                    selected.representative_article_id, group.event_label, group.reason, group.representative_reason))
+            if len(next_groups) >= len(current):
+                return tuple(current)
+            current = next_groups
+        return tuple(current)
 
     def group_company(company_id: str, values: list[RouteAMatch]):
         candidates = [EventCandidate(article_id(value.article), value.article.title, (value.article.text or value.article.description or "")[:1400], value.article.source, value.article.published_at) for value in values]

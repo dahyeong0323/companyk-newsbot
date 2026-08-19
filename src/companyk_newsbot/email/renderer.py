@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+from base64 import b64encode
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Iterable
 
 from companyk_newsbot.judges import SummaryOutput
 from companyk_newsbot.ranking import RankedNewsItem
+
+
+_WORDMARK_ASSET = Path(__file__).with_name("assets") / "company-k-partners-wordmark.png"
+
+
+@lru_cache(maxsize=1)
+def _company_k_wordmark_data_uri() -> str:
+    return "data:image/png;base64," + b64encode(_WORDMARK_ASSET.read_bytes()).decode("ascii")
 
 
 @dataclass(frozen=True)
@@ -52,10 +63,11 @@ class HtmlEmailRenderer:
 
     @staticmethod
     def _header(report_date: date, count: int) -> str:
+        wordmark = _company_k_wordmark_data_uri()
         return f"""<!doctype html><html lang="ko"><body style="margin:0;background:#f5f7fa;font-family:Arial,sans-serif;color:#172033">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:24px"><tr><td align="center">
 <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:680px;background:#fff;border-radius:12px;overflow:hidden">
-<tr><td style="padding:28px 32px;background:#15213b;color:#fff"><div style="font-size:12px;letter-spacing:.08em">COMPANY K PARTNERS</div><h1 style="margin:8px 0 0;font-size:23px">포트폴리오 데일리 뉴스</h1><p style="margin:8px 0 0;color:#cdd8ee">{report_date.isoformat()} · 주요 뉴스 {count}건</p></td></tr>
+<tr><td style="padding:30px 32px 28px;background:#15213b;color:#fff"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td valign="top"><div style="font-size:13px;font-weight:bold;color:#cdd8ee">{report_date.isoformat()}</div><h1 style="margin:10px 0 0;font-size:28px;line-height:35px;color:#fff">포트폴리오 데일리 뉴스</h1><p style="margin:8px 0 0;color:#cdd8ee">주요 뉴스 {count}건</p></td><td width="260" align="right" valign="top" style="padding-top:25px"><img src="{wordmark}" width="250" height="35" alt="Company K Partners" style="display:block;width:250px;height:35px;border:0;outline:none;text-decoration:none;filter:brightness(0) invert(1)"></td></tr></table></td></tr>
 <tr><td style="padding:12px 32px 32px">"""
 
     def _section(self, title: str, items: list[EmailNewsItem], *, external: bool) -> str:
@@ -87,10 +99,9 @@ class HtmlEmailRenderer:
         ]
 
     def _company_group(self, company: str, items: list[EmailNewsItem], *, external: bool) -> str:
-        label = "영향 회사" if external and any(len(news.item.impacted_companies) > 1 for news in items) else "회사"
         cards = "".join(self._item(item, external=external) for item in items)
         return f"""<section data-company-group=\"{escape(company, quote=True)}\" style=\"margin:24px 0 32px\">
-<div style=\"margin:0 0 10px;font-size:18px;font-weight:bold;color:#15213b\">{label}: {escape(company)}</div>
+<div style=\"margin:0 0 10px;font-size:18px;font-weight:bold;color:#15213b\">{escape(company)}</div>
 {cards}</section>"""
 
     @staticmethod
@@ -111,9 +122,9 @@ class HtmlEmailRenderer:
             why = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>왜 이 회사에 중요한가:</strong> {escape(summary.why_it_matters or '')}</p>"
         return f"""<article style="margin:12px 0;padding:18px 20px;border:1px solid #e3e8ef;border-radius:9px">
 <a href="{url}" style="display:block;color:#172033;font-size:16px;font-weight:bold;line-height:1.4;text-decoration:none">{title}</a>
-<div data-published-at="{escape(published_at, quote=True)}" style="margin-top:6px;font-size:12px;color:#697386"><span>{coverage}</span><span style="float:right">{relative_time}</span></div>
+<div style="margin-top:6px;font-size:12px;color:#697386">{coverage}</div>
 <p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#34445e">{main_summary}</p>{insight}{why}
-<p style="margin:12px 0 0;font-size:12px"><a href="{url}" style="color:#315ea8">기사 보기</a></p>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:12px"><tr><td><a href="{url}" style="color:#315ea8">기사 보기</a></td><td data-published-at="{escape(published_at, quote=True)}" align="right" valign="bottom" style="color:#697386">{relative_time}</td></tr></table>
 </article>"""
 
     @staticmethod

@@ -41,6 +41,11 @@ def test_renderer_separates_routes_and_escapes_untrusted_content() -> None:
 def test_renderer_displays_empty_section_without_error() -> None:
     rendered = HtmlEmailRenderer().render([direct_item()], report_date=date(2026, 8, 12))
     assert "해당 뉴스가 없습니다." in rendered.html
+    assert 'alt="Company K Partners"' in rendered.html
+    assert "data:image/png;base64," in rendered.html
+    assert "background:#15213b" in rendered.html
+    assert 'width="250" height="35"' in rendered.html
+    assert "line-height:35px" in rendered.html
 
 
 def test_route_a_zero_news_uses_the_frozen_v1_sentence() -> None:
@@ -91,3 +96,7 @@ def test_renderer_groups_same_company_events_once_and_sorts_them_newest_first() 
     assert rendered.html.index('data-company-group="Alpha"') < rendered.html.index('data-company-group="Beta"')
     assert rendered.html.index("Newer event") < rendered.html.index("Older event") < rendered.html.index('data-company-group="Beta"')
     assert 'data-published-at="2026-08-11T00:00:00+00:00"' in rendered.html
+    assert 'align="right" valign="bottom" style="color:#697386">' in rendered.html
+    assert "float:right" not in rendered.html
+    assert "회사: Alpha" not in rendered.html
+    assert ">Alpha</div>" in rendered.html
