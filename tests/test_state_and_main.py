@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from companyk_newsbot import main
-from companyk_newsbot.state import JsonStateStore, RunState
+from companyk_newsbot.state import GcsJsonStateStore, JsonStateStore, RunState, state_store_from_environment
 
 
 def test_json_state_store_persists_run_ledger_atomically(tmp_path) -> None:
@@ -59,6 +59,134 @@ def test_state_store_marks_a_delivery_batch_in_one_state_save(tmp_path, monkeypa
 
     assert saves == 1
     assert store.load().sent_event_fingerprints == ["event-1", "event-2"]
+
+
+class FakePreconditionFailed(Exception):
+    pass
+
+
+class FakeBlob:
+    def __init__(self, payload: str | None = None, generation: int = 7) -> None:
+        self.payload = payload
+        self.generation = generation if payload is not None else None
+        self.uploads: list[dict[str, object]] = []
+        self.fail_precondition = False
+
+    def exists(self) -> bool:
+        return self.payload is not None
+
+    def download_as_text(self, *, encoding: str) -> str:
+        assert encoding == "utf-8"
+        assert self.payload is not None
+        return self.payload
+
+    def upload_from_string(self, data: str, *, content_type: str, if_generation_match: int) -> None:
+        if self.fail_precondition:
+            raise FakePreconditionFailed()
+        self.uploads.append({"data": data, "content_type": content_type, "if_generation_match": if_generation_match})
+        self.payload = data
+        self.generation = (self.generation or 0) + 1
+
+
+class FakeGcsClient:
+    def __init__(self, blob: FakeBlob) -> None:
+        self.blob_instance = blob
+        self.bucket_names: list[str] = []
+        self.object_names: list[str] = []
+
+    def bucket(self, bucket_name: str):
+        self.bucket_names.append(bucket_name)
+        return self
+
+    def blob(self, object_name: str) -> FakeBlob:
+        self.object_names.append(object_name)
+        return self.blob_instance
+
+
+def gcs_store(blob: FakeBlob) -> GcsJsonStateStore:
+    return GcsJsonStateStore(
+        "test-state-bucket",
+        "production/newsbot_state.json",
+        client=FakeGcsClient(blob),
+        precondition_exception=FakePreconditionFailed,
+    )
+
+
+def test_gcs_state_missing_object_starts_empty_and_first_save_uses_generation_zero() -> None:
+    blob = FakeBlob()
+    store = gcs_store(blob)
+
+    assert store.load() == RunState()
+    store.mark_sent_many(("event-1", "event-2"), kind="event")
+
+    assert blob.uploads[0]["if_generation_match"] == 0
+    assert RunState(**json.loads(blob.payload)).sent_event_fingerprints == ["event-1", "event-2"]
+
+
+def test_gcs_state_loads_existing_object_and_uses_loaded_generation_for_save() -> None:
+    blob = FakeBlob(json.dumps({"sent_article_fingerprints": ["article-1"]}), generation=42)
+    store = gcs_store(blob)
+
+    assert store.was_sent("article-1", kind="article") is True
+    store.mark_sent("article-2", kind="article")
+
+    assert blob.uploads[-1]["if_generation_match"] == 42
+    assert RunState(**json.loads(blob.payload)).sent_article_fingerprints == ["article-1", "article-2"]
+
+
+def test_gcs_state_invalid_json_fails_closed() -> None:
+    with pytest.raises(RuntimeError, match="GCS state object is invalid"):
+        gcs_store(FakeBlob("not-json")).load()
+    with pytest.raises(RuntimeError, match="GCS state object is invalid"):
+        gcs_store(FakeBlob(json.dumps({"sent_event_fingerprints": "not-a-list"}))).load()
+
+
+def test_gcs_state_precondition_conflict_never_overwrites() -> None:
+    blob = FakeBlob()
+    store = gcs_store(blob)
+    store.load()
+    blob.fail_precondition = True
+
+    with pytest.raises(RuntimeError, match="changed concurrently"):
+        store.mark_sent("event-1", kind="event")
+    assert blob.payload is None
+
+
+def test_gcs_state_records_delivery_checkpoint() -> None:
+    blob = FakeBlob()
+    delivered = datetime(2026, 8, 12, 5, tzinfo=UTC)
+
+    state = gcs_store(blob).record_run(mode="live", status="success", checkpoint="delivery", at=delivered)
+
+    assert state.last_successful_delivery_run == delivered.isoformat()
+    assert RunState(**json.loads(blob.payload)).last_successful_delivery_run == delivered.isoformat()
+
+
+def test_state_store_factory_defaults_to_filesystem_and_validates_gcs(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("STATE_BACKEND", raising=False)
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    assert isinstance(state_store_from_environment(), JsonStateStore)
+    monkeypatch.setenv("STATE_BACKEND", "gcs")
+    monkeypatch.delenv("STATE_GCS_BUCKET", raising=False)
+    with pytest.raises(RuntimeError, match="STATE_GCS_BUCKET"):
+        state_store_from_environment()
+    monkeypatch.setenv("STATE_GCS_BUCKET", "test-state-bucket")
+    monkeypatch.setenv("STATE_GCS_OBJECT", "")
+    gcs_store = state_store_from_environment()
+    assert isinstance(gcs_store, GcsJsonStateStore)
+    assert gcs_store.object_name == "newsbot_state.json"
+    monkeypatch.setenv("STATE_BACKEND", "unknown")
+    with pytest.raises(RuntimeError, match="filesystem or gcs"):
+        state_store_from_environment()
+
+
+def test_main_uses_state_store_factory(monkeypatch, tmp_path) -> None:
+    store = JsonStateStore(tmp_path)
+    monkeypatch.setenv("RUN_MODE", "shadow")
+    monkeypatch.setattr(main, "state_store_from_environment", lambda: store)
+
+    assert main.main() == 0
+    assert store.load().run_ledger[-1]["phase"] == "pre_delivery_validation"
 
 
 def test_main_records_shadow_run_without_sending(monkeypatch, tmp_path) -> None:

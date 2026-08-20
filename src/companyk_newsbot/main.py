@@ -9,7 +9,7 @@ from .config import load_keyword_map
 from .portfolio_registry import load_portfolio_registry
 from .email import HtmlEmailRenderer, ResendEmailSender, ResendSettings
 from .e2e import E2EExecutionError, run_real_e2e
-from .state import JsonStateStore
+from .state import state_store_from_environment
 from zoneinfo import ZoneInfo
 
 
@@ -33,7 +33,7 @@ def main() -> int:
         mode = "e2e_test"
     if mode not in {"local", "test", "shadow", "e2e_test", "full_shadow", "cascade_eval", "live"}:
         raise ValueError("RUN_MODE must be local, test, shadow, e2e_test, full_shadow, cascade_eval, or live")
-    store = JsonStateStore(os.getenv("STATE_DIR", ".state"))
+    store = state_store_from_environment()
     if mode == "live":
         if not _enabled("PRODUCTION_EMAIL_ENABLED"):
             raise RuntimeError("live mode requires PRODUCTION_EMAIL_ENABLED=true")

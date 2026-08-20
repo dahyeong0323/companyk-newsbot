@@ -15,6 +15,7 @@ dependencies = [
   "PyYAML>=6.0,<7",
   "openpyxl>=3.1,<4",
   "beautifulsoup4>=4.12,<5",
+  "google-cloud-storage>=2.18,<4",
 ]
 
 [project.scripts]
