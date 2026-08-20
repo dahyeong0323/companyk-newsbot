@@ -40,8 +40,8 @@ from companyk_newsbot.runtime_progress import RuntimeProgress
 from companyk_newsbot.state import JsonStateStore
 
 
-TEST_RECIPIENT = "jeremy.cheon@pm.me"
-PRODUCTION_RECIPIENT = "jeremy.cheon@pm.me"
+TEST_RECIPIENTS = ("jeremy.cheon@pm.me",)
+PRODUCTION_RECIPIENTS = ("jeremy.cheon@pm.me", "taejin3789@naver.com")
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_SMOKE_DIRECT_QUERY_CAP = 8
 DEFAULT_SMOKE_EXPOSURE_QUERY_CAP = 8
@@ -278,14 +278,14 @@ def build_query_plan(
 
 
 def _assert_test_recipient(settings: ResendSettings) -> None:
-    if settings.recipient.casefold() != TEST_RECIPIENT:
-        raise E2EExecutionError("safety_check", f"test delivery may send only to {TEST_RECIPIENT}")
+    if tuple(recipient.casefold() for recipient in settings.recipients) != TEST_RECIPIENTS:
+        raise E2EExecutionError("safety_check", f"test delivery may send only to {TEST_RECIPIENTS[0]}")
 
 
 def _assert_production_recipient(settings: ResendSettings) -> None:
     """Keep the configured recipient boundary explicit for the frozen v1 rollout."""
-    if settings.recipient.casefold() != PRODUCTION_RECIPIENT:
-        raise E2EExecutionError("safety_check", "v1 production recipient must match the configured rollout recipient")
+    if tuple(recipient.casefold() for recipient in settings.recipients) != PRODUCTION_RECIPIENTS:
+        raise E2EExecutionError("safety_check", "v1 production recipients must match the configured rollout list")
 
 
 def _openai_timeout_seconds() -> float:

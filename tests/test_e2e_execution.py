@@ -83,7 +83,7 @@ class FakeJudge:
 def configure_safe_environment(monkeypatch) -> None:
     monkeypatch.setenv("ROUTE_B_ENABLED", "true")
     monkeypatch.setenv("RESEND_API_KEY", "test-secret")
-    monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENT)
+    monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENTS[0])
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-secret")
     monkeypatch.setenv("NEWSBOT_COST_FIRST_PIPELINE", "false")
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FakeCollector)
@@ -129,7 +129,7 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
 
     class FakeSender:
         def __init__(self, settings):
-            recipients.append(settings.recipient)
+            recipients.append(settings.recipients)
 
         def send(self, rendered):
             return "delivery-test-id"
@@ -148,7 +148,7 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
     assert result.final_items == 1
     assert result.summary_calls == 1
     assert result.delivery_id == "delivery-test-id"
-    assert recipients == [e2e.TEST_RECIPIENT]
+    assert recipients == [e2e.TEST_RECIPIENTS]
     assert summary_settings == [("gpt-5.6-luna", "low")]
 
 def test_editorial_trace_log_preserves_nested_event_without_collision(monkeypatch) -> None:
@@ -163,10 +163,10 @@ def test_editorial_trace_log_preserves_nested_event_without_collision(monkeypatc
 
 
 def test_shadow_delivery_guard_allows_only_fixed_test_recipient() -> None:
-    e2e._assert_test_recipient(ResendSettings("key", e2e.TEST_RECIPIENT, "sender@example.com"))
+    e2e._assert_test_recipient(ResendSettings("key", e2e.TEST_RECIPIENTS, "sender@example.com"))
     import pytest
-    with pytest.raises(e2e.E2EExecutionError, match=e2e.TEST_RECIPIENT):
-        e2e._assert_test_recipient(ResendSettings("key", "production@example.com", "sender@example.com"))
+    with pytest.raises(e2e.E2EExecutionError, match=e2e.TEST_RECIPIENTS[0]):
+        e2e._assert_test_recipient(ResendSettings("key", ("production@example.com",), "sender@example.com"))
 
 
 def test_default_route_a_only_never_constructs_or_calls_route_b(monkeypatch, tmp_path) -> None:
@@ -249,7 +249,7 @@ def test_insufficient_collection_is_inconclusive_and_never_sends_normal_shadow(m
     monkeypatch.setenv("ROUTE_B_ENABLED", "false")
     monkeypatch.setenv("RSS_MIN_SUCCESS_RATIO", "0.90")
     monkeypatch.setenv("RESEND_API_KEY", "test-secret")
-    monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENT)
+    monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENTS[0])
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FailedCollector)
     monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))

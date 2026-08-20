@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from companyk_newsbot.config import load_keyword_map
-from companyk_newsbot.e2e import E2EExecutionError, TEST_RECIPIENT, _assert_test_recipient, build_query_plan
+from companyk_newsbot.e2e import E2EExecutionError, PRODUCTION_RECIPIENTS, TEST_RECIPIENTS, _assert_production_recipient, _assert_test_recipient, build_query_plan
 from companyk_newsbot.email import ResendSettings
 from companyk_newsbot.rules import ExposureRegistry
 
@@ -49,6 +49,12 @@ def test_query_plan_fetches_cross_route_normalized_query_once() -> None:
 
 
 def test_smoke_delivery_guard_accepts_only_fixed_test_recipient() -> None:
-    _assert_test_recipient(ResendSettings("secret", TEST_RECIPIENT.upper(), "Bot <bot@example.com>"))
+    _assert_test_recipient(ResendSettings("secret", (TEST_RECIPIENTS[0].upper(),), "Bot <bot@example.com>"))
     with pytest.raises(E2EExecutionError, match="may send only"):
-        _assert_test_recipient(ResendSettings("secret", "production@example.com", "Bot <bot@example.com>"))
+        _assert_test_recipient(ResendSettings("secret", ("production@example.com",), "Bot <bot@example.com>"))
+
+
+def test_production_delivery_guard_accepts_only_the_approved_recipient_list() -> None:
+    _assert_production_recipient(ResendSettings("secret", PRODUCTION_RECIPIENTS, "Bot <bot@example.com>"))
+    with pytest.raises(E2EExecutionError, match="recipients must match"):
+        _assert_production_recipient(ResendSettings("secret", (PRODUCTION_RECIPIENTS[0],), "Bot <bot@example.com>"))

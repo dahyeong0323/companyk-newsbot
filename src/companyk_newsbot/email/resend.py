@@ -17,21 +17,24 @@ class DeliveryError(RuntimeError):
 @dataclass(frozen=True)
 class ResendSettings:
     api_key: str
-    recipient: str
+    recipients: tuple[str, ...]
     sender: str
 
     @classmethod
     def from_environment(cls) -> "ResendSettings":
         api_key = os.getenv("RESEND_API_KEY", "").strip()
-        recipient = os.getenv("NEWSBOT_RECIPIENT", "jeremy.cheon@pm.me").strip()
+        raw_recipients = os.getenv("NEWSBOT_RECIPIENT", "jeremy.cheon@pm.me")
+        recipients = tuple(
+            dict.fromkeys(value.strip() for value in raw_recipients.split(",") if value.strip())
+        )
         sender = os.getenv("EMAIL_FROM", "Company K Newsbot <onboarding@resend.dev>").strip()
         if not api_key:
             raise DeliveryError("RESEND_API_KEY is required for delivery")
-        if not recipient or "@" not in recipient:
-            raise DeliveryError("NEWSBOT_RECIPIENT must be a valid email address")
+        if not recipients or any("@" not in recipient for recipient in recipients):
+            raise DeliveryError("NEWSBOT_RECIPIENT must be a comma-separated list of valid email addresses")
         if not sender or "@" not in sender:
             raise DeliveryError("EMAIL_FROM must be a valid sender address")
-        return cls(api_key=api_key, recipient=recipient, sender=sender)
+        return cls(api_key=api_key, recipients=recipients, sender=sender)
 
 
 class ResendEmailSender:
@@ -51,7 +54,7 @@ class ResendEmailSender:
             response = self._client.post(
                 self.endpoint,
                 headers={"Authorization": f"Bearer {self.settings.api_key}"},
-                json={"from": self.settings.sender, "to": [self.settings.recipient], "subject": email.subject, "html": email.html},
+                json={"from": self.settings.sender, "to": list(self.settings.recipients), "subject": email.subject, "html": email.html},
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
