@@ -10,8 +10,8 @@ from companyk_newsbot.ranking import RankedNewsItem
 from companyk_newsbot.rules import RouteAMatch, RouteBCandidate
 
 
-def article(title: str) -> Article:
-    return Article(source="test", source_type="fixture", title=title, url="https://example.com/?a=1&b=2", canonical_url="https://example.com/?a=1&b=2", retrieved_at=datetime(2026, 8, 12, tzinfo=UTC))
+def article(title: str, *, source: str = "test") -> Article:
+    return Article(source=source, source_type="fixture", title=title, url="https://example.com/?a=1&b=2", canonical_url="https://example.com/?a=1&b=2", retrieved_at=datetime(2026, 8, 12, tzinfo=UTC))
 
 
 def direct_item() -> EmailNewsItem:
@@ -46,6 +46,25 @@ def test_renderer_displays_empty_section_without_error() -> None:
     assert "background:#15213b" in rendered.html
     assert 'width="250" height="35"' in rendered.html
     assert "line-height:35px" in rendered.html
+
+
+def test_renderer_displays_each_article_publisher_and_relative_time_below_its_title() -> None:
+    match = RouteAMatch("Direct Co", ("Direct",), article("Funding announced", source="Reuters & Partners"))
+    news = EmailNewsItem(
+        RankedNewsItem.from_direct(match),
+        SummaryOutput(
+            fact_summary="투자 유치 소식입니다.", insight_one_liner="자금 집행 속도가 다음 확인 변수다.",
+            insight_dimension="financing_runway", insight_mode="watchpoint", confidence="medium",
+            evidence_article_ids=[article_id(match.article)],
+        ),
+    )
+
+    rendered = HtmlEmailRenderer().render([news], report_date=date(2026, 8, 12))
+
+    assert 'padding:18px 20px 20px' in rendered.html
+    assert 'data-publisher="Reuters &amp; Partners"' in rendered.html
+    assert '>Reuters &amp; Partners · <span data-published-at="">발행 시각 미상</span></div>' in rendered.html
+    assert "외 0개 매체 보도" not in rendered.html
 
 
 def test_route_a_zero_news_uses_the_frozen_v1_sentence() -> None:
@@ -96,7 +115,7 @@ def test_renderer_groups_same_company_events_once_and_sorts_them_newest_first() 
     assert rendered.html.index('data-company-group="Alpha"') < rendered.html.index('data-company-group="Beta"')
     assert rendered.html.index("Newer event") < rendered.html.index("Older event") < rendered.html.index('data-company-group="Beta"')
     assert 'data-published-at="2026-08-11T00:00:00+00:00"' in rendered.html
-    assert 'align="right" valign="bottom" style="color:#697386">' in rendered.html
+    assert '>test · <span data-published-at="2026-08-11T00:00:00+00:00">' in rendered.html
     assert "float:right" not in rendered.html
     assert "회사: Alpha" not in rendered.html
     assert ">Alpha</div>" in rendered.html

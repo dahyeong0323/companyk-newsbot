@@ -111,20 +111,18 @@ class HtmlEmailRenderer:
         url = escape(item.article_url, quote=True)
         main_summary = escape(summary.summary)
         source = item.direct_match.article.source if item.direct_match else item.external_match.candidate.article.source
-        coverage = escape(source)
-        if item.coverage_count > 1:
-            coverage += f" · 외 {item.coverage_count - 1}개 매체 보도"
+        publisher = escape(source)
         published_at = item.published_at.isoformat() if item.published_at else ""
         relative_time = HtmlEmailRenderer._relative_time(item.published_at)
         insight = "" if not summary.insight_one_liner else f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>투자자 관점:</strong> {escape(summary.insight_one_liner)}</p>"
         why = ""
         if external:
             why = f"<p style=\"margin:10px 0 0;font-size:14px;line-height:1.55;color:#26364f\"><strong>왜 이 회사에 중요한가:</strong> {escape(summary.why_it_matters or '')}</p>"
-        return f"""<article style="margin:12px 0;padding:18px 20px;border:1px solid #e3e8ef;border-radius:9px">
+        return f"""<article style="margin:12px 0;padding:18px 20px 20px;border:1px solid #e3e8ef;border-radius:9px">
 <a href="{url}" style="display:block;color:#172033;font-size:16px;font-weight:bold;line-height:1.4;text-decoration:none">{title}</a>
-<div style="margin-top:6px;font-size:12px;color:#697386">{coverage}</div>
+<div data-publisher="{escape(source, quote=True)}" style="margin-top:6px;font-size:12px;color:#697386">{publisher} · <span data-published-at="{escape(published_at, quote=True)}">{relative_time}</span></div>
 <p style="margin:10px 0 0;font-size:14px;line-height:1.55;color:#34445e">{main_summary}</p>{insight}{why}
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:12px"><tr><td><a href="{url}" style="color:#315ea8">기사 보기</a></td><td data-published-at="{escape(published_at, quote=True)}" align="right" valign="bottom" style="color:#697386">{relative_time}</td></tr></table>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:12px;font-size:12px"><tr><td><a href="{url}" style="color:#315ea8">기사 보기</a></td></tr></table>
 </article>"""
 
     @staticmethod

@@ -14,6 +14,7 @@ RSS_BODY = b"""<?xml version="1.0" encoding="UTF-8"?>
 <item><title>Example &amp;amp; Co raises funding</title>
 <link>https://news.example.com/story?utm_source=google&amp;id=42#section</link>
 <pubDate>Mon, 11 Aug 2026 08:00:00 GMT</pubDate>
+<source url="https://www.reuters.com/">Reuters</source>
 <description>&lt;b&gt;Funding&lt;/b&gt; &amp;amp; expansion announced.</description></item>
 <item><title></title><link>https://news.example.com/invalid</link></item>
 </channel></rss>"""
@@ -40,6 +41,7 @@ def test_collects_and_normalizes_google_news_items() -> None:
     assert len(articles) == 1
     article = articles[0]
     assert article.title == "Example & Co raises funding"
+    assert article.source == "Reuters"
     assert article.canonical_url == "https://news.example.com/story?id=42"
     assert article.description == "Funding & expansion announced."
     assert article.published_at == datetime(2026, 8, 11, 8, 0, tzinfo=UTC)

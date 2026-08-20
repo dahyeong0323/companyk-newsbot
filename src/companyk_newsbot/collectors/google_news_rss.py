@@ -204,6 +204,18 @@ def plain_text(value: str | None) -> str | None:
     return normalized or None
 
 
+def publisher_name(entry: dict[str, Any]) -> str:
+    """Use Google News' per-item publisher when the RSS entry supplies one."""
+    source = entry.get("source")
+    if isinstance(source, dict):
+        name = source.get("title") or source.get("name")
+        if isinstance(name, str):
+            return plain_text(name) or "Google News"
+    if isinstance(source, str):
+        return plain_text(source) or "Google News"
+    return "Google News"
+
+
 def parse_published_at(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -520,7 +532,7 @@ class GoogleNewsRSSCollector:
             return None
         description = plain_text(entry.get("summary") or entry.get("description"))
         return Article(
-            source="Google News",
+            source=publisher_name(entry),
             source_type="google_news_rss",
             title=title,
             url=url,
