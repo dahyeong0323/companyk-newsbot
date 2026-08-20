@@ -1,183 +1,57 @@
 # Company K Newsbot
 
-Greenfield implementation of the Company K portfolio news bot. The frozen rule
-map in `config/keyword_map_FINAL.yaml` is the runtime source of truth; company
-keywords must not be duplicated in Python.
+Company K Partners의 주요 포트폴리오 관련 뉴스를 매일 정리해 보내는 내부 뉴스 브리핑 시스템입니다.
 
-The active build specification is
-`docs/COMPANYK_NEWSBOT_CODEX_BUILD_PROMPT_RAILWAY_FINAL.md`. Railway Cron will
-be the eventual production scheduler; GitHub remains source control only.
+매일 아침, 등록된 포트폴리오 기업과 직접적으로 관련된 중요한 보도를 수집하고, 같은 사건을 중복으로 보내지 않도록 정리한 뒤 이메일로 전달합니다. 단순히 회사 이름이 포함된 기사 목록이 아니라, 투자자 관점에서 확인할 가치가 있는 사건만 짧고 읽기 쉽게 추려내는 것이 목적입니다.
 
-## Current production-candidate scope
+## 무엇을 보내나요
 
-The v1 production path is Route A-only: registry, Google News RSS coverage
-gate, freshness, deduplication, enrichment, deterministic identity matching,
-event clustering, Luna DirectEvent assessment, grounding, and email delivery.
-Route B remains disabled in production.
+매일 아침 8시(KST)에 Company K Partners의 등록 포트폴리오 기업 관련 주요 뉴스를 이메일로 보냅니다.
 
-## Validate the configuration
+각 기사 카드에는 다음 정보가 담깁니다.
 
-```powershell
-python -m pytest
-python -m companyk_newsbot.cli validate-config
-```
+- 기사 제목과 원문 링크
+- 기사를 보도한 언론사
+- 발행 후 경과 시간
+- 사건의 핵심 사실
+- 투자자 관점에서 다음으로 확인할 포인트
 
-The second command validates `config/keyword_map_FINAL.yaml` by default. Use
-`--config PATH` to validate a candidate copy without changing the frozen map.
+현재 등록된 포트폴리오 기업은 155개이며, 기업명·별칭·과거 명칭까지 함께 반영해 검색합니다.
 
-## Google News RSS collector
+## 어떻게 고르나요
 
-`GoogleNewsRSSCollector` accepts explicit queries and produces canonical
-`Article` records. Query generation remains out of scope until the Route A and
-Route B steps, so this collector does not yet read company or exposure rules.
+1. Google News를 통해 각 포트폴리오 기업 관련 최신 보도를 수집합니다.
+2. 기사 본문과 공개 메타데이터를 보강해, 단순 동명이인이나 무관한 언급을 걸러냅니다.
+3. 여러 매체가 같은 사건을 보도한 경우 하나의 사건으로 묶고, 정보가 가장 충실한 대표 기사를 선택합니다.
+4. 실제 사업·제품·투자·규제·경영·중요 계약 등 투자자가 확인할 만한 사건만 남깁니다.
+5. 남은 사건을 중요도와 최신성 기준으로 정렬한 뒤, 이메일로 전달합니다.
 
-## Route A direct-company detection
+그래서 여러 매체가 같은 내용을 반복 보도해도 메일에는 같은 사건이 여러 번 쌓이지 않습니다.
 
-`RouteADetector` accepts the validated map and returns direct company matches
-for a normalized `Article`. It reads company names, aliases, standalone guards,
-required context, and negative/English ambiguity context from the FINAL YAML.
-It makes no LLM calls and does not yet classify events, deduplicate, rank, or
-send alerts.
+## 메일을 읽는 방법
 
-## Deduplication
+메일의 각 카드는 하나의 독립적인 사건입니다. 기사 제목 아래에는 해당 대표 기사의 언론사와 발행 경과 시간이 표시됩니다.
 
-`ArticleDeduplicator` collapses exact canonical-URL and normalized-title
-duplicates while retaining an audit group and reason. `RouteAEventClusterer`
-then groups similar cross-publication Route A coverage only within the same
-company. Conflicting numeric facts (for example, different funding amounts) are
-kept as separate events for later review.
+`언론사 · 3시간 전`
 
-## Route A-only default
+본문은 확인된 사실을 짧게 정리하고, 이어지는 **투자자 관점**은 그 사실을 본 뒤 무엇을 추가로 봐야 하는지 알려줍니다. 기사 원문은 카드의 **기사 보기** 링크에서 확인할 수 있습니다.
 
-The normal runtime loads `config/portfolio_registry.yaml`, builds direct queries
-for every registered current/former company name, and never loads Route B
-configuration. After freshness and article deduplication, query-scoped articles
-whose RSS snippet does not expose the candidate identity receive bounded free
-publisher-page enrichment. JSON-LD, OpenGraph, `<article>`, and `<main>` evidence
-is preferred; failures remain a deterministic no-match. Dedup preserves all
-originating query/company provenance and every publisher URL is fetched at most
-once per run. Deterministic Route A matching and proto-event clustering then run
-before one low-reasoning Luna assessment
-per event. Every unique `DELIVER` event is ordered by materiality, recency, and
-stable tie-breaker; there is no global or per-company delivery cap. Every
-email-bound event receives one Luna grounding call. The assessment text is
-reused directly; there is no article-level classifier or second summary call.
+## 운영 원칙
 
-## RSS resilience and collection coverage
+- 하루 전송은 예약된 오전 8시(KST) 실행에서만 이뤄집니다.
+- 수집 성공률이 기준에 못 미치면, 불완전한 브리핑을 보내지 않습니다.
+- 기사 발송 기록을 보존해 이미 보낸 동일 사건을 다시 보내지 않습니다.
+- 실제 발송 상태와 검토용 Shadow 실행 상태는 분리합니다. Shadow는 실제 운영 기록을 바꾸지 않고, 필요할 때만 테스트 수신자에게 검토 메일을 보낼 수 있습니다.
+- API 키와 수신자 정보 등 민감한 운영 정보는 저장소에 넣지 않고 Railway 환경 변수로 관리합니다.
 
-Google News RSS requests use a stable explicit `User-Agent`, `Accept`, and
-`Accept-Language` profile. Transient `429`, `502`, `503`, `504`, connection
-failures, and read timeouts receive at most two retries with bounded exponential
-backoff and jitter. A usable `Retry-After` on `429` or `503` is honored up to
-five seconds. Six requests remain the healthy concurrency ceiling; a dominant
-transient-failure window triggers a cooldown and at most two serial probes. If
-those real queued queries also fail, the remaining queue is recorded as
-`skipped_systemic_failure` instead of being hammered or mislabeled as a timeout.
+## 현재 운영 상태
 
-`RSS_MIN_SUCCESS_RATIO` defaults to `0.90`. Every configured direct query stays
-in the denominator. Below the threshold the run is `inconclusive`, normal
-briefing rendering and delivery stop, production delivery checkpoints and sent
-fingerprints remain unchanged, and a Full Shadow writes a clearly labeled
-collection-failure artifact. A zero-news briefing is valid only after sufficient
-collection coverage and normal freshness/routing complete with zero final Route
-A events.
+- 발송 시간: 매일 오전 8시(KST)
+- 실행 환경: Railway
+- 기본 범위: 포트폴리오 기업 직접 뉴스
+- 외부 영향 뉴스(Route B): 현재 운영 발송에서는 비활성화
+- 이메일 제목: `포트폴리오 데일리 뉴스`
 
-Set `ROUTE_B_ENABLED=true` only to opt into the preserved experimental Route B
-pipeline. The default also keeps `ROUTE_A_EVENT_RESOLVER_ENABLED=false`, so there
-are no pre-assessment model calls. Sol is rejected by the Route A judge and
-grounder.
+## 참고
 
-## Dormant Route B exposure candidates
-
-`ExposureRegistry` turns only registered `external_exposures[].subject.query_terms`
-into de-duplicated collector queries and retains every company-specific exposure
-attachment. `RouteBCandidateGenerator` accepts only articles whose collector
-query is registered, and enforces `valid_from` before creating candidates.
-It does not yet decide causal fit or materiality; that is the Step 6 judge.
-
-## Cost-first Route B classifier
-
-When Route B is explicitly enabled, `NEWSBOT_COST_FIRST_PIPELINE=true` selects
-the preserved GPT-5.4 nano classifier, which resolves
-clear Route B ACCEPT/REJECT cases and returns `ESCALATE_TO_LUNA` for genuine
-ambiguity. Nano operational failures also escalate to GPT-5.6 Luna. A terminal
-Luna operational failure conservatively retains the candidate with
-`accepted_due_to_classifier_failure=true`; it is never treated as a semantic
-reject. The cost-first path rejects any Sol model configuration.
-
-Set `NEWSBOT_COST_FIRST_PIPELINE=false` to restore the frozen `c8783a8`
-Luna-primary / Sol-fallback classifier. This rollback code is isolated in
-`route_b_legacy.py` and is unreachable from the normal cost-first path.
-
-## Legacy Route B ranking and summaries
-
-`NewsRanker` applies the configured daily and per-company caps, ordered as high
-direct news → high external impact → other direct news → medium/low external
-impact. `NewsSummarizer` runs only after an item is qualified and ranked. It
-uses GPT-5.6 Luna at low reasoning effort to produce a short grounded factual
-summary; Route B items include a direct `why_it_matters` only when needed.
-Luna grounding remains mandatory and deterministic safe fallback remains in
-place.
-
-## HTML email rendering
-
-`HtmlEmailRenderer` renders a standalone Korean HTML email. The default Route
-A-only mode emits one direct-news feed and omits the empty Route B section.
-Legacy opt-in mode retains separate direct/external sections. It HTML-escapes
-article content and never renders internal exposure IDs.
-
-## Local / shadow pipeline
-
-`NewsPipeline` composes normalized articles through article deduplication, Route
-A event clustering, Route B candidate generation and judgement, ranking,
-summary, and HTML rendering. It does not send mail. A fully offline fixture
-integration test proves this flow; the runtime command comes next.
-
-## Railway deployment preparation
-
-Railway runs one short-lived batch process: `python -m companyk_newsbot.main`.
-For v1 production, set `RUN_MODE=live`, `PRODUCTION_EMAIL_ENABLED=true`, keep
-`ROUTE_B_ENABLED=false`, and set
-`PORTFOLIO_REGISTRY_PATH=config/portfolio_registry.yaml`,
-`DIRECT_EVENT_MODEL=gpt-5.6-luna`, `DIRECT_GROUNDING_MODEL=gpt-5.6-luna`, and
-`STATE_DIR=/data`. Store `OPENAI_API_KEY`
-only as a Railway secret Variable. Attach a Railway Volume at `/data`; the JSON
-state there stores recent run ledger entries and sent fingerprints for the
-future idempotency layer. No cron expression is committed: configure it in UTC
-only after a KST delivery window and shadow-runtime lead time are measured.
-
-The current entry point validates config and records a pre-delivery shadow run;
-it cannot send email, and `live` mode is deliberately blocked.
-
-Railway cron is evaluated in UTC. `railway.json` configures `0 23 * * *`, which
-is 08:00 Asia/Seoul every day. The application uses Asia/Seoul for the email date
-and blocks non-scheduled `live` starts outside a short scheduler tolerance window,
-preventing deployment-time delivery.
-
-## Offline replay limitation
-
-Classifier replay requires the exact stored `description`, `text`, and
-`origin_metadata` used by the classifier. The replay loader fails explicitly
-when a historical artifact lacks those fields; it never recollects live news.
-New Full Shadow artifacts persist these fields so future migrations can replay
-the exact candidate corpus.
-
-## Railway skeleton
-
-`railway.json` declares a one-shot batch command with no restart policy. It has
-no cron schedule yet: the UTC cron expression and KST delivery window belong to
-Step 10, after shadow-runtime measurements.
-
-## Schema assumptions encoded today
-
-- `schema_version`, `name`, `company_rules`, and `external_impact_logic` are required.
-- `company_rules` is a mapping keyed by company name; each company has an
-  `aliases` field (which may deliberately be empty).
-- Each company must declare either one or more `external_exposures` or an explicit
-  `no_justified_external_exposure.status: true` closure.
-- Exposure IDs are globally unique; exposures require a subject, query terms,
-  ISO `valid_from`, evidence URL/source type, and valid event-family references.
-- Event families must match the configured external-impact matching rules.
-
-These checks preserve the distinction between a confirmed zero-exposure closure
-and missing exposure data.
+이 저장소는 Company K Partners의 내부 운영용 뉴스 브리핑 시스템입니다. 뉴스의 사실관계와 원문은 각 기사 링크에서 확인하며, 메일의 요약과 투자자 관점은 빠른 검토를 돕기 위한 보조 정보입니다.
