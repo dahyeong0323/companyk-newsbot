@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from companyk_newsbot import e2e
@@ -88,6 +88,35 @@ def configure_safe_environment(monkeypatch) -> None:
     monkeypatch.setenv("NEWSBOT_COST_FIRST_PIPELINE", "false")
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FakeCollector)
     monkeypatch.setattr(e2e, "RouteBCausalMaterialityJudge", FakeJudge)
+
+
+def test_full_shadow_can_use_explicit_lookback_without_reading_delivery_checkpoint(monkeypatch) -> None:
+    monkeypatch.setenv("FULL_SHADOW_LOOKBACK_HOURS", "30")
+    checkpoint = NOW - timedelta(hours=2)
+
+    window, hint = e2e._freshness_window_and_hint(
+        profile="full_shadow",
+        now=NOW,
+        last_successful_delivery_run=checkpoint,
+    )
+
+    assert window.mode == "full_shadow_lookback"
+    assert window.start == NOW - timedelta(hours=30)
+    assert hint == "when:2d"
+
+
+def test_explicit_full_shadow_lookback_never_changes_production_window(monkeypatch) -> None:
+    monkeypatch.setenv("FULL_SHADOW_LOOKBACK_HOURS", "30")
+    checkpoint = NOW - timedelta(hours=2)
+
+    window, _ = e2e._freshness_window_and_hint(
+        profile="production",
+        now=NOW,
+        last_successful_delivery_run=checkpoint,
+    )
+
+    assert window.mode == "since_last_successful_run"
+    assert window.start == checkpoint - timedelta(hours=2)
 
 
 def test_zero_item_smoke_is_inconclusive_and_skips_email(monkeypatch, tmp_path) -> None:

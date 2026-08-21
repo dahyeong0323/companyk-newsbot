@@ -29,7 +29,7 @@ from companyk_newsbot.judges.direct_event import DirectEventGrounder, DirectEven
 from companyk_newsbot.enrichment import PublisherArticleEnricher
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
 from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, RenderedEmail, ResendEmailSender, ResendSettings
-from companyk_newsbot.freshness import delivery_window, filter_articles, rss_freshness_hint, smoke_window
+from companyk_newsbot.freshness import FreshnessWindow, delivery_window, filter_articles, full_shadow_window, rss_freshness_hint, smoke_window
 from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
 from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
 from companyk_newsbot.judges.route_b_legacy import RouteBCascadeJudge as LegacyRouteBCascadeJudge
@@ -303,6 +303,32 @@ def _rss_max_lookback_days() -> int:
     return _positive_int_from_environment("RSS_MAX_LOOKBACK_DAYS", DEFAULT_RSS_MAX_LOOKBACK_DAYS)
 
 
+def _freshness_window_and_hint(
+    *,
+    profile: ExecutionProfile,
+    now: datetime,
+    last_successful_delivery_run: datetime | None,
+) -> tuple[FreshnessWindow, str]:
+    if profile == "smoke":
+        smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
+        return smoke_window(now=now, lookback_days=smoke_days), f"when:{smoke_days}d"
+
+    explicit_shadow_hours = os.getenv("FULL_SHADOW_LOOKBACK_HOURS", "").strip()
+    if profile == "full_shadow" and explicit_shadow_hours:
+        lookback_hours = _positive_int_from_environment("FULL_SHADOW_LOOKBACK_HOURS", DEFAULT_FIRST_RUN_HOURS)
+        window = full_shadow_window(now=now, lookback_hours=lookback_hours)
+    else:
+        first_run_hours = _positive_int_from_environment("FRESHNESS_FIRST_RUN_HOURS", DEFAULT_FIRST_RUN_HOURS)
+        overlap_hours = _positive_int_from_environment("FRESHNESS_OVERLAP_HOURS", DEFAULT_OVERLAP_HOURS)
+        window = delivery_window(
+            now=now,
+            last_successful_delivery_run=last_successful_delivery_run,
+            overlap_hours=overlap_hours,
+            first_run_hours=first_run_hours,
+        )
+    return window, rss_freshness_hint(window, maximum_days=_rss_max_lookback_days())
+
+
 def _fingerprint(item: RankedNewsItem) -> tuple[str, str]:
     kind = "event" if item.route == "direct" else "article"
     if item.route == "direct" and item.direct_event is not None:
@@ -436,20 +462,11 @@ def _run_route_a_only_e2e(
         raise E2EExecutionError("configuration", "RSS collection requires at least one configured direct query")
 
     delivery_checkpoint_before = store.last_delivery_datetime()
-    if profile == "smoke":
-        smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
-        freshness_window = smoke_window(now=run_time, lookback_days=smoke_days)
-        freshness_hint = f"when:{smoke_days}d"
-    else:
-        first_run_hours = _positive_int_from_environment("FRESHNESS_FIRST_RUN_HOURS", DEFAULT_FIRST_RUN_HOURS)
-        overlap_hours = _positive_int_from_environment("FRESHNESS_OVERLAP_HOURS", DEFAULT_OVERLAP_HOURS)
-        freshness_window = delivery_window(
-            now=run_time,
-            last_successful_delivery_run=delivery_checkpoint_before,
-            overlap_hours=overlap_hours,
-            first_run_hours=first_run_hours,
-        )
-        freshness_hint = rss_freshness_hint(freshness_window, maximum_days=_rss_max_lookback_days())
+    freshness_window, freshness_hint = _freshness_window_and_hint(
+        profile=profile,
+        now=run_time,
+        last_successful_delivery_run=delivery_checkpoint_before,
+    )
     _log(
         "queries_prepared",
         profile=profile,
@@ -994,20 +1011,11 @@ def run_real_e2e(
     registry = ExposureRegistry(config)
     query_plan = build_query_plan(config, profile=profile)
     delivery_checkpoint_before = store.last_delivery_datetime()
-    if profile == "smoke":
-        smoke_days = _positive_int_from_environment("E2E_SMOKE_LOOKBACK_DAYS", DEFAULT_SMOKE_LOOKBACK_DAYS)
-        freshness_window = smoke_window(now=run_time, lookback_days=smoke_days)
-        freshness_hint = f"when:{smoke_days}d"
-    else:
-        first_run_hours = _positive_int_from_environment("FRESHNESS_FIRST_RUN_HOURS", DEFAULT_FIRST_RUN_HOURS)
-        overlap_hours = _positive_int_from_environment("FRESHNESS_OVERLAP_HOURS", DEFAULT_OVERLAP_HOURS)
-        freshness_window = delivery_window(
-            now=run_time,
-            last_successful_delivery_run=store.last_delivery_datetime(),
-            overlap_hours=overlap_hours,
-            first_run_hours=first_run_hours,
-        )
-        freshness_hint = rss_freshness_hint(freshness_window, maximum_days=_rss_max_lookback_days())
+    freshness_window, freshness_hint = _freshness_window_and_hint(
+        profile=profile,
+        now=run_time,
+        last_successful_delivery_run=delivery_checkpoint_before,
+    )
     _log(
         "queries_prepared",
         profile=profile,

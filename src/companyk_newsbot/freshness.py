@@ -10,7 +10,7 @@ from typing import Iterable, Literal
 from companyk_newsbot.models import Article
 
 
-FreshnessMode = Literal["smoke_7d", "since_last_successful_run"]
+FreshnessMode = Literal["smoke_7d", "since_last_successful_run", "full_shadow_lookback"]
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,14 @@ def smoke_window(*, now: datetime, lookback_days: int) -> FreshnessWindow:
         raise ValueError("smoke lookback days must be positive")
     end = utc_datetime(now)
     return FreshnessWindow("smoke_7d", end - timedelta(days=lookback_days), end)
+
+
+def full_shadow_window(*, now: datetime, lookback_hours: int) -> FreshnessWindow:
+    """Build an explicit non-delivery review window for a full shadow run."""
+    if lookback_hours < 1:
+        raise ValueError("full-shadow lookback hours must be positive")
+    end = utc_datetime(now)
+    return FreshnessWindow("full_shadow_lookback", end - timedelta(hours=lookback_hours), end)
 
 
 def delivery_window(

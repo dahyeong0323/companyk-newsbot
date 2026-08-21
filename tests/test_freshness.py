@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from companyk_newsbot.freshness import delivery_window, filter_articles, rss_freshness_hint, smoke_window
+from companyk_newsbot.freshness import delivery_window, filter_articles, full_shadow_window, rss_freshness_hint, smoke_window
 from companyk_newsbot.models import Article
 
 
@@ -45,6 +45,14 @@ def test_first_run_fallback_is_bounded_to_30_hours() -> None:
     assert window.start == NOW - timedelta(hours=30)
     assert len(result.accepted) == 1
     assert result.rejected_too_old == 1
+
+
+def test_full_shadow_window_uses_an_explicit_hourly_lookback() -> None:
+    window = full_shadow_window(now=NOW, lookback_hours=30)
+
+    assert window.mode == "full_shadow_lookback"
+    assert window.start == NOW - timedelta(hours=30)
+    assert window.end == NOW
 
 
 def test_future_and_missing_timestamps_are_rejected_separately() -> None:
