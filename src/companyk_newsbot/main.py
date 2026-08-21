@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .config import load_keyword_map
 from .portfolio_registry import load_portfolio_registry
-from .email import HtmlEmailRenderer, ResendEmailSender, ResendSettings
+from .email import HtmlEmailRenderer, email_sender_from_settings, email_settings_from_environment
 from .e2e import E2EExecutionError, run_real_e2e
 from .state import state_store_from_environment
 from zoneinfo import ZoneInfo
@@ -134,13 +134,13 @@ def main() -> int:
     if mode == "test":
         load_portfolio_registry(os.getenv("PORTFOLIO_REGISTRY_PATH", "config/portfolio_registry.yaml"))
         rendered = HtmlEmailRenderer().render([], report_date=date.today())
-        sender = ResendEmailSender(ResendSettings.from_environment())
+        sender = email_sender_from_settings(email_settings_from_environment())
         try:
             delivery_id = sender.send(rendered)
         finally:
             sender.close()
         store.record_run(mode=mode, status="success", details={"phase": "delivery_test", "delivery_id": delivery_id})
-        print("Test email accepted by Resend.")
+        print("Test email accepted by the configured provider.")
         return 0
     if os.getenv("ROUTE_B_ENABLED", "false").strip().casefold() in {"1", "true", "yes", "on"}:
         load_keyword_map()

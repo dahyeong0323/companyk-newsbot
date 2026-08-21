@@ -28,7 +28,7 @@ from companyk_newsbot.semantic_grouping import GPT54MiniGroupingProvider
 from companyk_newsbot.judges.direct_event import DirectEventGrounder, DirectEventJudge
 from companyk_newsbot.enrichment import PublisherArticleEnricher
 from companyk_newsbot.dedup import ArticleDeduplicator, LunaEventPairResolver, RepresentativeArticleSelector, RouteAEventClusterer, RouteBEventClusterer
-from companyk_newsbot.email import EmailNewsItem, HtmlEmailRenderer, RenderedEmail, ResendEmailSender, ResendSettings
+from companyk_newsbot.email import EmailDeliverySettings, EmailNewsItem, HtmlEmailRenderer, RenderedEmail, email_delivery_stage, email_sender_from_settings, email_settings_from_environment
 from companyk_newsbot.freshness import FreshnessWindow, delivery_window, filter_articles, full_shadow_window, rss_freshness_hint, smoke_window
 from companyk_newsbot.full_shadow_artifacts import FullShadowArtifactJournal, journal_collection_data, journal_event_data, journal_qualification_data, journal_ranking_data, preflight_artifact_dir, write_full_shadow_artifacts
 from companyk_newsbot.judges import InsightGroundingVerifier, NewsSummarizer, RouteBCascadeJudge, RouteBCausalMaterialityJudge
@@ -277,12 +277,12 @@ def build_query_plan(
     return E2EQueryPlan(profile, direct_queries, exposure_queries, tuple(queries))
 
 
-def _assert_test_recipient(settings: ResendSettings) -> None:
+def _assert_test_recipient(settings: EmailDeliverySettings) -> None:
     if tuple(recipient.casefold() for recipient in settings.recipients) != TEST_RECIPIENTS:
         raise E2EExecutionError("safety_check", f"test delivery may send only to {TEST_RECIPIENTS[0]}")
 
 
-def _assert_production_recipient(settings: ResendSettings) -> None:
+def _assert_production_recipient(settings: EmailDeliverySettings) -> None:
     """Keep the configured recipient boundary explicit for the frozen v1 rollout."""
     if tuple(recipient.casefold() for recipient in settings.recipients) != PRODUCTION_RECIPIENTS:
         raise E2EExecutionError("safety_check", "v1 production recipients must match the configured rollout list")
@@ -428,7 +428,7 @@ def _run_route_a_only_e2e(
     total_started = monotonic()
     run_time = (now or datetime.now(UTC)).astimezone(UTC)
     report_date = run_time.astimezone(KST).date()
-    settings = ResendSettings.from_environment() if deliver else None
+    settings = email_settings_from_environment() if deliver else None
     if settings is not None:
         if profile == "production":
             _assert_production_recipient(settings)
@@ -838,13 +838,14 @@ def _run_route_a_only_e2e(
     email_seconds = 0.0
     if settings is not None:
         email_started = monotonic()
-        sender = ResendEmailSender(settings)
+        sender = email_sender_from_settings(settings)
         try:
             delivery_id = sender.send(rendered)
         except Exception as exc:
+            stage = email_delivery_stage(settings)
             if artifact_journal:
-                artifact_journal.fail(f"resend_delivery: {exc}")
-            raise E2EExecutionError("resend_delivery", str(exc)) from exc
+                artifact_journal.fail(f"{stage}: {exc}")
+            raise E2EExecutionError(stage, str(exc)) from exc
         finally:
             sender.close()
         email_seconds = _seconds(email_started)
@@ -996,7 +997,7 @@ def run_real_e2e(
     run_time = (now or datetime.now(UTC)).astimezone(UTC)
     run_id = f"full_shadow_{run_time.strftime('%Y%m%dT%H%M%SZ')}_{uuid4().hex[:12]}"
     report_date = run_time.astimezone(KST).date()
-    settings = ResendSettings.from_environment() if deliver else None
+    settings = email_settings_from_environment() if deliver else None
     if settings is not None:
         _assert_test_recipient(settings)
 
@@ -1357,14 +1358,14 @@ def run_real_e2e(
             render_seconds = _seconds(render_started)
             if settings is not None:
                 email_started = monotonic()
-                sender = ResendEmailSender(settings)
+                sender = email_sender_from_settings(settings)
                 try:
                     delivery_id = sender.send(rendered)
                 finally:
                     sender.close()
                 email_seconds = _seconds(email_started)
         except Exception as exc:
-            stage = "resend_delivery" if settings is not None else "email_render"
+            stage = email_delivery_stage(settings) if settings is not None else "email_render"
             if artifact_journal:
                 artifact_journal.fail(f"{stage}: {exc}")
             raise E2EExecutionError(stage, str(exc)) from exc
