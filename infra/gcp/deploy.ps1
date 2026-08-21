@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)] [string]$StateBucket,
     [Parameter(Mandatory = $true)] [string]$ProductionRecipient,
     [Parameter(Mandatory = $true)] [string]$EmailFrom,
+    [ValidateSet("resend", "gmail")] [string]$EmailProvider = "gmail",
     [string]$Region = "us-central1",
     [string]$ArtifactRepository = "companyk-newsbot",
     [string]$ImageTag = "",
@@ -26,7 +27,8 @@ $shared = @(
     "DIRECT_GROUNDING_REASONING=low",
     "RSS_MIN_SUCCESS_RATIO=0.90",
     "STATE_BACKEND=gcs",
-    "STATE_GCS_BUCKET=$StateBucket"
+    "STATE_GCS_BUCKET=$StateBucket",
+    "EMAIL_PROVIDER=$EmailProvider"
 )
 $shadowEnv = "^|^" + (($shared + @(
     "RUN_MODE=full_shadow",
@@ -42,7 +44,11 @@ $productionEnv = "^|^" + (($shared + @(
     "NEWSBOT_RECIPIENT=$ProductionRecipient",
     "EMAIL_FROM=$EmailFrom"
 )) -join "|")
-$secrets = "OPENAI_API_KEY=OPENAI_API_KEY:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
+$secrets = if ($EmailProvider -eq "gmail") {
+    "OPENAI_API_KEY=OPENAI_API_KEY:latest,GMAIL_CLIENT_ID=GMAIL_CLIENT_ID:latest,GMAIL_CLIENT_SECRET=GMAIL_CLIENT_SECRET:latest,GMAIL_REFRESH_TOKEN=GMAIL_REFRESH_TOKEN:latest"
+} else {
+    "OPENAI_API_KEY=OPENAI_API_KEY:latest,RESEND_API_KEY=RESEND_API_KEY:latest"
+}
 
 gcloud config set project $ProjectId | Out-Null
 gcloud builds submit --tag $image

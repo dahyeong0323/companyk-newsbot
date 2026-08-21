@@ -33,7 +33,11 @@ foreach ($secret in "OPENAI_API_KEY", "RESEND_API_KEY") {
     if (-not (gcloud secrets describe $secret 2>$null)) { gcloud secrets create $secret --replication-policy automatic }
     gcloud secrets add-iam-policy-binding $secret --member "serviceAccount:$runtimeEmail" --role "roles/secretmanager.secretAccessor"
 }
+foreach ($secret in "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN") {
+    if (-not (gcloud secrets describe $secret 2>$null)) { throw "Required Gmail secret does not exist: $secret" }
+    gcloud secrets add-iam-policy-binding $secret --member "serviceAccount:$runtimeEmail" --role "roles/secretmanager.secretAccessor"
+}
 gcloud projects add-iam-policy-binding $ProjectId --member "serviceAccount:$schedulerEmail" --role "roles/run.invoker"
 
 Write-Host "Bootstrap complete. No secret values, Cloud Run jobs, or Scheduler jobs were created."
-Write-Host "Add exactly one current version to OPENAI_API_KEY and RESEND_API_KEY separately; do not paste secrets into this script."
+Write-Host "Add current OpenAI/Resend secret versions separately. Existing Gmail secrets are granted to the runtime account but are never read or printed by this script."

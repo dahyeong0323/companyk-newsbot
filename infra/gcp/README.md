@@ -7,11 +7,11 @@ This directory prepares an additive migration from the current **Railway live** 
 ```text
 Cloud Scheduler (08:00 Asia/Seoul)
   -> Cloud Run Job (python -m companyk_newsbot.main)
-  -> Google News RSS / existing frozen pipeline / Resend
+  -> Google News RSS / existing frozen pipeline / Gmail API or Resend
   -> GCS state object with generation-precondition writes
 ```
 
-`OPENAI_API_KEY` and `RESEND_API_KEY` are referenced from Secret Manager. The image is built once with Cloud Build into Artifact Registry and used by both jobs. State is stored through the GCS API, never through a GCS FUSE `STATE_DIR` mount.
+`OPENAI_API_KEY` and the selected delivery provider's credentials are referenced from Secret Manager. Gmail uses `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN`; Resend remains available as a rollback provider. The image is built once with Cloud Build into Artifact Registry and used by both jobs. State is stored through the GCS API, never through a GCS FUSE `STATE_DIR` mount.
 
 ## Application configuration
 
@@ -41,7 +41,7 @@ Install and authenticate the Google Cloud CLI, select a billing-enabled project,
 .\infra\gcp\bootstrap.ps1 -ProjectId <project-id>
 ```
 
-This enables the required APIs and creates (if missing) the Docker Artifact Registry repository, runtime and scheduler service accounts, a regional Standard state bucket with uniform bucket-level access, and the two empty Secret Manager resources. It does **not** add secret versions, create Cloud Run Jobs, or create a Scheduler job.
+This enables the required APIs and creates (if missing) the Docker Artifact Registry repository, runtime and scheduler service accounts, a regional Standard state bucket with uniform bucket-level access, and the empty OpenAI/Resend Secret Manager resources. It grants the runtime service account access to the pre-existing Gmail secrets, without reading, printing, rotating, or creating them. It does **not** add secret versions, create Cloud Run Jobs, or create a Scheduler job.
 
 Add secret values separately, without placing them in source control:
 
@@ -58,14 +58,15 @@ Keep only the currently required secret versions active where operationally poss
 .\infra\gcp\deploy.ps1 `
   -ProjectId <project-id> `
   -StateBucket companyk-newsbot-state-<project-id> `
-  -ProductionRecipient <operator-supplied-recipient> `
-  -EmailFrom <operator-supplied-sender>
+  -ProductionRecipient <comma-separated-approved-recipients> `
+  -EmailFrom "Company K Newsbot <ckpnewsbot@gmail.com>" `
+  -EmailProvider gmail
 ```
 
 The script builds one commit-tagged image, then updates two one-task Cloud Run Jobs with `max retries = 0`:
 
 - `companyk-newsbot-shadow`: `RUN_MODE=full_shadow`, no production email, distinct shadow state object.
-- `companyk-newsbot-prod`: `RUN_MODE=live`, production state object, but is never executed by this script.
+- `companyk-newsbot-prod`: `RUN_MODE=live`, production state object, and Gmail (or explicitly selected Resend) credentials from Secret Manager, but is never executed by this script.
 
 `max retries = 0` avoids an automatic post-email retry if a process fails before state persistence. The production recipient and sender are mandatory operator parameters and are never hardcoded in this repository.
 
