@@ -94,7 +94,7 @@ def test_zero_item_smoke_is_inconclusive_and_skips_email(monkeypatch, tmp_path) 
     configure_safe_environment(monkeypatch)
     FakeCollector.articles = ()
     sent = []
-    monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))
+    monkeypatch.setattr(e2e, "email_sender_from_settings", lambda settings: sent.append(settings))
 
     result = e2e.run_real_e2e(config(), JsonStateStore(tmp_path), now=NOW)
 
@@ -138,7 +138,7 @@ def test_nonempty_smoke_summarizes_and_delivers_only_to_test_recipient(monkeypat
             pass
 
     monkeypatch.setattr(e2e, "NewsSummarizer", FakeSummarizer)
-    monkeypatch.setattr(e2e, "ResendEmailSender", FakeSender)
+    monkeypatch.setattr(e2e, "email_sender_from_settings", FakeSender)
 
     result = e2e.run_real_e2e(config(), JsonStateStore(tmp_path), now=NOW)
 
@@ -252,7 +252,7 @@ def test_insufficient_collection_is_inconclusive_and_never_sends_normal_shadow(m
     monkeypatch.setenv("NEWSBOT_RECIPIENT", e2e.TEST_RECIPIENTS[0])
     monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", FailedCollector)
-    monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))
+    monkeypatch.setattr(e2e, "email_sender_from_settings", lambda settings: sent.append(settings))
 
     result = e2e.run_real_e2e(
         PortfolioRegistry.from_legacy(config()), store, now=NOW, profile="full_shadow", deliver=True,
@@ -344,7 +344,7 @@ def test_production_raw_zero_news_below_98_percent_is_inconclusive_and_never_del
     monkeypatch.setenv("ROUTE_B_ENABLED", "false")
     monkeypatch.setattr(e2e, "GoogleNewsRSSCollector", PartialEmptyCollector)
     sent = []
-    monkeypatch.setattr(e2e, "ResendEmailSender", lambda settings: sent.append(settings))
+    monkeypatch.setattr(e2e, "email_sender_from_settings", lambda settings: sent.append(settings))
 
     result = e2e.run_real_e2e(
         PortfolioRegistry.from_legacy(config()), JsonStateStore(tmp_path), now=NOW, profile="production", deliver=False,

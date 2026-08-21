@@ -44,6 +44,21 @@ Company K Partners의 주요 포트폴리오 관련 뉴스를 매일 정리해 �
 - 실제 발송 상태와 검토용 Shadow 실행 상태는 분리합니다. Shadow는 실제 운영 기록을 바꾸지 않고, 필요할 때만 테스트 수신자에게 검토 메일을 보낼 수 있습니다.
 - API 키와 수신자 정보 등 민감한 운영 정보는 저장소에 넣지 않고 Railway 환경 변수로 관리합니다.
 
+## 이메일 발송 provider
+
+기본 provider는 `EMAIL_PROVIDER=resend`이며, 기존 Resend 발송은 Gmail 전환 후에도 rollback 경로로 유지됩니다. Gmail API를 사용하려면 별도 승인 후 `EMAIL_PROVIDER=gmail`과 아래 환경 변수를 모두 설정합니다.
+
+```text
+GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET
+GMAIL_REFRESH_TOKEN
+EMAIL_FROM=Company K Newsbot <ckpnewsbot@gmail.com>
+```
+
+Gmail은 `gmail.send` 권한만 사용하는 OAuth 2.0 refresh-token 방식입니다. 최초 동의는 `tools/gmail_oauth_setup.py --output <저장소_밖의_민감_경로>`로 로컬에서 실행하며, 전용 계정 `ckpnewsbot@gmail.com`으로만 로그인합니다. 출력 파일·OAuth client secret·refresh token은 Git이나 로그에 저장하지 않습니다.
+
+OAuth consent screen이 External `Testing` 상태이면 Gmail refresh token은 7일 후 만료될 수 있습니다. 매일 자동 발송에 사용하기 전 OAuth publishing 상태와 장기 credential 정책을 별도로 확인해야 합니다.
+
 ## 현재 운영 상태
 
 - 발송 시간: 매일 오전 8시(KST)
